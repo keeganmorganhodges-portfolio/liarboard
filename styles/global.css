@@ -1,0 +1,70 @@
+:root {
+    --bg: #121212;
+    --card: black;
+    --primary: white;
+    --text: black;
+    --accent: white;
+}
+body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 0; /* Changed to 0 to work with fixed navbar */
+    line-height: 1.5;
+}
+/* Fix for content hiding under the fixed navbar */
+.container, .doc-container, .con-container {
+    padding-top: 80px; 
+    max-width: 1200px;
+    margin: 0 auto;
+}
+.navbar {
+    height: 60px;
+    position: fixed;
+    background-color: black;
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 1002;
+}
+.nav-links {
+    list-style-type: none;
+    margin: 20px;
+    padding: 0;
+    display: flex;
+}
+.nav-links li {
+    margin-left: 20px;
+}
+.nav-links li a {
+    color: white;
+    text-decoration: none;
+    padding: 10px 15px;
+    display: block;
+    transition: background-color 0.3s;
+    border-radius: 10px;
+}
+.nav-links li a:hover {
+    background-color: #555;
+}
+.logo {
+    display: flex;
+    align-items: center;
+    padding-left: 20px;
+    height: 55px;
+}
+.logo img {
+    height: 100%;
+    width: auto;
+    object-fit: contain;
+}
+@media (max-width: 768px) {
+    .navbar { padding: 0 10px; }
+    .nav-links li { margin-left: 10px; }
+    .nav-links li a { font-size: 14px; padding: 8px 10px; }
+}
