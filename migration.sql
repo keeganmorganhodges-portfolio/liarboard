@@ -1,44 +1,44 @@
 -- ============================================================
--- LiarBoard D1 Migration
+-- LiarBoard D1 Migration v2
 -- HOW TO RUN:
---   Option A (Dashboard): Cloudflare Dashboard → D1 → your DB → Console tab
---                         Paste each statement one at a time and click Run.
---   Option B (CLI):       wrangler d1 execute <DB_NAME> --remote --file=migration.sql
---
--- SAFE TO RE-RUN: Each ALTER TABLE is wrapped so it won't crash if the
--- column already exists. D1 (SQLite) does not support ALTER TABLE ... IF NOT EXISTS,
--- so we use a workaround: try the ALTER, catch the "duplicate column" error.
--- If running via the Dashboard console, just skip any statement that errors
--- with "duplicate column name" — that just means it already ran fine before.
+--   Dashboard: Cloudflare → D1 → your DB → Console tab
+--              Paste each statement ONE AT A TIME and click Run.
+--              Skip any that say "duplicate column name" — that just
+--              means it already ran before. That is fine.
+--   CLI:       wrangler d1 execute <DB_NAME> --remote --file=migration.sql
 -- ============================================================
 
--- ── 1. Core people table (run once on a brand-new DB) ───────────────────────
+-- ── 1. Core people table ─────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS people (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  name        TEXT    NOT NULL,
-  image       TEXT    NOT NULL,
-  bio         TEXT,
-  class       TEXT    DEFAULT 'Other',
-  lvl         INTEGER DEFAULT 50,
-  created_by  TEXT,
-  timestamp   INTEGER DEFAULT (strftime('%s','now') * 1000)
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  name            TEXT    NOT NULL,
+  image           TEXT    NOT NULL DEFAULT '',
+  bio             TEXT,
+  claim           TEXT,
+  truth           TEXT,
+  sources         TEXT,
+  class           TEXT    NOT NULL DEFAULT 'Other',
+  lvl             INTEGER NOT NULL DEFAULT 50,
+  debunk_count    INTEGER NOT NULL DEFAULT 0,
+  last_corrected  INTEGER,
+  created_by      TEXT,
+  timestamp       INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
 );
 
--- ── 2. New LiarBoard columns ─────────────────────────────────────────────────
--- Run each line separately in the Dashboard console.
--- Skip any that error with "duplicate column name" — that's fine.
-ALTER TABLE people ADD COLUMN claim         TEXT;
-ALTER TABLE people ADD COLUMN truth         TEXT;
-ALTER TABLE people ADD COLUMN sources       TEXT;
-ALTER TABLE people ADD COLUMN debunk_count  INTEGER DEFAULT 0;
+-- ── 2. Add columns if upgrading from the old schema ──────────────────────────
+-- Run each individually. Skip any "duplicate column name" errors.
+ALTER TABLE people ADD COLUMN claim          TEXT;
+ALTER TABLE people ADD COLUMN truth          TEXT;
+ALTER TABLE people ADD COLUMN sources        TEXT;
+ALTER TABLE people ADD COLUMN debunk_count   INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE people ADD COLUMN last_corrected INTEGER;
 
--- ── 3. Admin users table ─────────────────────────────────────────────────────
+-- ── 3. Admin users ───────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS admin_users (
   id       INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT NOT NULL UNIQUE,
-  password TEXT NOT NULL,
-  role     TEXT NOT NULL DEFAULT 'sub'
+  username TEXT    NOT NULL UNIQUE,
+  password TEXT    NOT NULL,
+  role     TEXT    NOT NULL DEFAULT 'sub'
 );
 
 -- ── 4. Site metadata (version control) ──────────────────────────────────────
@@ -46,23 +46,26 @@ CREATE TABLE IF NOT EXISTS site_metadata (
   id             INTEGER PRIMARY KEY,
   version_number REAL    NOT NULL DEFAULT 1.0
 );
--- Seed the first row if it doesn't exist
 INSERT OR IGNORE INTO site_metadata (id, version_number) VALUES (1, 1.0);
 
--- ── 5. Optional: messages table (for future inbox feature) ──────────────────
+-- ── 5. Messages (optional / future) ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS messages (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   sender    TEXT,
   receiver  TEXT,
   body      TEXT,
-  timestamp INTEGER DEFAULT (strftime('%s','now') * 1000)
+  timestamp INTEGER DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
 );
 
--- ── 6. Indexes for faster queries ────────────────────────────────────────────
-CREATE INDEX IF NOT EXISTS idx_people_timestamp     ON people (timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_people_class         ON people (class);
-CREATE INDEX IF NOT EXISTS idx_people_debunk_count  ON people (debunk_count DESC);
-CREATE INDEX IF NOT EXISTS idx_people_last_corrected ON people (last_corrected DESC);
+-- ── 6. Performance indexes ────────────────────────────────────────────────────
+-- These are the critical ones for your new class-filtered queries.
+CREATE INDEX IF NOT EXISTS idx_people_class_ts       ON people (class, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_people_class_debunk   ON people (class, debunk_count DESC);
+CREATE INDEX IF NOT EXISTS idx_people_class_corrected ON people (class, last_corrected DESC);
+CREATE INDEX IF NOT EXISTS idx_people_class_lvl      ON people (class, CAST(lvl AS INTEGER) DESC);
+CREATE INDEX IF NOT EXISTS idx_people_timestamp      ON people (timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_people_debunk         ON people (debunk_count DESC);
+CREATE INDEX IF NOT EXISTS idx_people_corrected      ON people (last_corrected DESC);
 
--- ── Verification query (run to confirm everything looks right) ───────────────
--- SELECT name, sql FROM sqlite_master WHERE type='table' ORDER BY name;
+-- ── Verify ───────────────────────────────────────────────────────────────────
+-- SELECT name, sql FROM sqlite_master WHERE type IN ('table','index') ORDER BY type, name;
