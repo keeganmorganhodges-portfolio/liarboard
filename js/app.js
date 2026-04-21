@@ -2,749 +2,716 @@
 
 // =============================================================================
 // LiarBoard SPA — app.js
-// Single-file vanilla JS SPA. No build step, no dependencies.
-//
-// Architecture:
-//   LB.router  — hash-based router (#/, #/board, #/category/CEO, #/person/42)
-//   LB.cache   — per-category localStorage cache keyed by version
-//   LB.api     — thin fetch wrappers for /api/* endpoints
-//   LB.render  — page renderers (landing, board, category, person, docs, contact)
-//   LB.contact — contact page helpers (exposed for inline onclick)
+// Hash-based SPA. No framework, no build step, no dependencies.
 // =============================================================================
 
-const LB = (() => {
+// ─── CONSTANTS ─────────────────────────────────────────────────────────────────
+const CLASSES = ["Politician","CEO","Media","Celebrity","Influencer","Official","Other"];
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // CONSTANTS
-  // ───────────────────────────────────────────────────────────────────────────
-  const CLASSES = ["Politician","CEO","Media","Celebrity","Influencer","Official","Other"];
+const CLASS_META = {
+  Politician: { icon:"🏛️", desc:"Elected officials and government figures" },
+  CEO:        { icon:"💼", desc:"Corporate executives and business leaders" },
+  Media:      { icon:"📰", desc:"Journalists, anchors, and media personalities" },
+  Celebrity:  { icon:"🎬", desc:"Actors, musicians, and public entertainers" },
+  Influencer: { icon:"📱", desc:"Social media personalities and online figures" },
+  Official:   { icon:"🏢", desc:"Appointed officials and public servants" },
+  Other:      { icon:"🔍", desc:"Public figures not covered by other categories" },
+};
 
-  const CLASS_META = {
-    Politician: { icon: "🏛️", desc: "Elected officials and government figures" },
-    CEO:        { icon: "💼", desc: "Corporate executives and business leaders" },
-    Media:      { icon: "📰", desc: "Journalists, anchors, and media personalities" },
-    Celebrity:  { icon: "🎬", desc: "Actors, musicians, and public entertainers" },
-    Influencer: { icon: "📱", desc: "Social media personalities and online figures" },
-    Official:   { icon: "🏢", desc: "Appointed officials and public servants" },
-    Other:      { icon: "🔍", desc: "Public figures not covered by other categories" },
+// Changing this string busts ALL user caches automatically on next visit
+const CACHE_PREFIX = "lb3_";
+const KEY_VERSION  = CACHE_PREFIX + "ver";
+const classKey     = (cls) => CACHE_PREFIX + "cls_" + cls;
+const personKey    = (id)  => CACHE_PREFIX + "p_"   + id;
+
+const VALID_SORTS = new Set(["newest","oldest","lvlHigh","lvlLow","mostDebunked","recentCorrect"]);
+
+// Inline SVG fallbacks for broken images — zero extra network requests
+const SVG_CARD  = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='220'%3E%3Crect width='320' height='220' fill='%231e293b'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-size='14'%3ENo Image%3C/text%3E%3C/svg%3E";
+const SVG_LARGE = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='500'%3E%3Crect width='600' height='500' fill='%231e293b'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-size='18'%3ENo Image%3C/text%3E%3C/svg%3E";
+
+// ─── UTILITIES ─────────────────────────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return "";
+  return String(s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
+    .replace(/'/g,"&#039;");
+}
+
+function debounce(fn, ms) {
+  ms = ms || 400;
+  var t;
+  return function() {
+    var args = arguments, ctx = this;
+    clearTimeout(t);
+    t = setTimeout(function() { fn.apply(ctx, args); }, ms);
   };
+}
 
-  // Cache key prefix — bump this to bust ALL user caches on a code deploy
-  const CACHE_PREFIX  = "lb3_";
-  const KEY_VERSION   = CACHE_PREFIX + "ver";
-  // Per-class: lb3_class_CEO, lb3_class_Politician, etc.
-  const classKey  = (cls) => `${CACHE_PREFIX}class_${cls}`;
-  const personKey = (id)  => `${CACHE_PREFIX}person_${id}`;
+function $(id) { return document.getElementById(id); }
 
-  // Sort map (whitelist — mirrors the server-side map exactly)
-  const SORT_MAP = {
-    newest:        true,
-    oldest:        true,
-    lvlHigh:       true,
-    lvlLow:        true,
-    mostDebunked:  true,
-    recentCorrect: true,
-  };
+function cloneTemplate(id) {
+  var tpl = document.querySelector("template#" + id);
+  if (!tpl) { console.error("Template not found:", id); return document.createDocumentFragment(); }
+  return tpl.content.cloneNode(true);
+}
 
-  // Broken image SVG fallbacks
-  const SVG_CARD   = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='220'%3E%3Crect width='320' height='220' fill='%231e293b'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-size='14'%3ENo Image%3C/text%3E%3C/svg%3E`;
-  const SVG_LARGE  = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='500'%3E%3Crect width='600' height='500' fill='%231e293b'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-size='18'%3ENo Image%3C/text%3E%3C/svg%3E`;
+function setApp(node) {
+  var app = $("app");
+  if (!app) return;
+  app.innerHTML = "";
+  if (node) app.appendChild(node);
+  window.scrollTo(0, 0);
+}
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // UTILITIES
-  // ───────────────────────────────────────────────────────────────────────────
-  function esc(s) {
-    if (s == null) return "";
-    return String(s)
-      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-      .replace(/>/g,"&gt;").replace(/"/g,"&quot;")
-      .replace(/'/g,"&#039;");
-  }
+function fmtDate(ts) {
+  if (!ts) return "";
+  return new Date(Number(ts)).toLocaleDateString(undefined, { year:"numeric", month:"short", day:"numeric" });
+}
 
-  function debounce(fn, ms = 400) {
-    let t;
-    return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
-  }
+var store = {
+  get: function(k)    { try { return localStorage.getItem(k); }  catch(e) { return null; } },
+  set: function(k, v) { try { localStorage.setItem(k, v); }      catch(e) { /* quota */ } },
+  del: function(k)    { try { localStorage.removeItem(k); }      catch(e) { /* */ }       },
+};
 
-  function $(id) { return document.getElementById(id); }
+// ─── API ───────────────────────────────────────────────────────────────────────
+var api = {
+  _ver: null, // in-memory version so we don't double-fetch per page-load
 
-  function cloneTemplate(id) {
-    const tpl = document.querySelector(`template#${id}`);
-    if (!tpl) { console.error("Template not found:", id); return null; }
-    return tpl.content.cloneNode(true);
-  }
-
-  function setApp(node) {
-    const app = $("app");
-    app.innerHTML = "";
-    if (node) app.appendChild(node);
-    window.scrollTo(0, 0);
-  }
-
-  function fmtDate(ts) {
-    if (!ts) return "";
-    return new Date(Number(ts)).toLocaleDateString(undefined, { year:"numeric", month:"short", day:"numeric" });
-  }
-
-  // Safe localStorage helpers — quota errors are caught silently
-  const store = {
-    get(k)    { try { return localStorage.getItem(k); }        catch { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); }            catch { /* quota */ } },
-    del(k)    { try { localStorage.removeItem(k); }            catch { /* */ } },
-  };
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // API LAYER
-  // ───────────────────────────────────────────────────────────────────────────
-  const api = {
-    async version() {
-      try {
-        const r = await fetch("/api/check-version");
-        if (!r.ok) return null;
-        const d = await r.json();
-        return d.version_number != null ? String(d.version_number) : null;
-      } catch { return null; }
-    },
-
-    // Fetch people for a class, with optional sort/search/cursor.
-    // Returns { data: [], nextCursor: null|number }
-    async people({ cls, sort = "newest", search = "", cursor = null } = {}) {
-      const p = new URLSearchParams();
-      if (cls)    p.set("class",  cls);
-      if (sort && SORT_MAP[sort]) p.set("sort", sort);
-      if (search) p.set("search", search);
-      if (cursor) p.set("cursor", String(cursor));
-      const r = await fetch(`/api/people?${p}`);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();  // { data, nextCursor }
-    },
-
-    // Fetch a single person by ID
-    async person(id) {
-      const r = await fetch(`/api/person/${id}`);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    },
-
-    // Fetch board stats (total entries + claims count)
-    async stats() {
-      try {
-        const r = await fetch("/api/stats");
-        if (!r.ok) return null;
-        return r.json();
-      } catch { return null; }
-    },
-  };
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // CACHE LAYER
-  // Per-class caching: lb3_class_CEO = { version, data: [], complete: bool }
-  // A "complete" cache means all pages of that class are loaded (no nextCursor).
-  // Individual person pages are cached separately by ID.
-  // The main admin bumps version_number → all lb3_class_* caches become stale.
-  // ───────────────────────────────────────────────────────────────────────────
-  const cache = {
-    _liveVersion: null,
-
-    async getLiveVersion() {
-      if (this._liveVersion) return this._liveVersion;
-      const v = await api.version();
-      if (v) { this._liveVersion = v; store.set(KEY_VERSION, v); }
+  version: async function() {
+    if (this._ver) return this._ver;
+    try {
+      var r = await fetch("/api/check-version");
+      if (!r.ok) return null;
+      var d = await r.json();
+      var v = d.version_number != null ? String(d.version_number) : null;
+      if (v) { this._ver = v; store.set(KEY_VERSION, v); }
       return v;
-    },
+    } catch(e) { return null; }
+  },
 
-    // Returns cached data array for a class if fresh, otherwise null
-    async getClass(cls) {
-      const liveVer = await this.getLiveVersion();
-      const raw = store.get(classKey(cls));
-      if (!raw) return null;
-      try {
-        const obj = JSON.parse(raw);
-        if (!obj || obj.version !== liveVer) return null;
-        return obj; // { version, data, complete }
-      } catch { store.del(classKey(cls)); return null; }
-    },
+  people: async function(opts) {
+    opts = opts || {};
+    var cls    = opts.cls    || "";
+    var sort   = opts.sort   || "newest";
+    var search = opts.search || "";
+    var cursor = opts.cursor || null;
+    var p = new URLSearchParams();
+    if (cls)                      p.set("class",  cls);
+    if (VALID_SORTS.has(sort))    p.set("sort",   sort);
+    if (search)                   p.set("search", search);
+    if (cursor)                   p.set("cursor", String(cursor));
+    var r = await fetch("/api/people?" + p.toString());
+    if (!r.ok) throw new Error("Server error " + r.status);
+    return r.json();
+  },
 
-    setClass(cls, data, complete, version) {
-      const obj = { version, data, complete };
-      store.set(classKey(cls), JSON.stringify(obj));
-    },
+  person: async function(id) {
+    var r = await fetch("/api/person/" + id);
+    if (!r.ok) throw new Error(r.status === 404 ? "Entry not found" : "Server error " + r.status);
+    return r.json();
+  },
 
-    // Cache a single person record (keyed by ID + version)
-    async getPerson(id) {
-      const liveVer = await this.getLiveVersion();
-      const raw = store.get(personKey(id));
-      if (!raw) return null;
-      try {
-        const obj = JSON.parse(raw);
-        if (!obj || obj.version !== liveVer) return null;
-        return obj.data;
-      } catch { store.del(personKey(id)); return null; }
-    },
+  stats: async function() {
+    try {
+      var r = await fetch("/api/stats");
+      if (!r.ok) return null;
+      return r.json();
+    } catch(e) { return null; }
+  },
+};
 
-    setPerson(id, data, version) {
-      store.set(personKey(id), JSON.stringify({ version, data }));
-    },
+// ─── CACHE ─────────────────────────────────────────────────────────────────────
+var cache = {
+  getClass: async function(cls) {
+    var liveVer = await api.version();
+    if (!liveVer) return null;
+    var raw = store.get(classKey(cls));
+    if (!raw) return null;
+    try {
+      var obj = JSON.parse(raw);
+      if (!obj || obj.version !== liveVer) { store.del(classKey(cls)); return null; }
+      return obj;
+    } catch(e) { store.del(classKey(cls)); return null; }
+  },
 
-    // Invalidate everything (used when version bumped server-side)
-    invalidateAll() {
-      const keys = [];
-      try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && k.startsWith(CACHE_PREFIX)) keys.push(k);
-        }
-        keys.forEach(k => store.del(k));
-      } catch { /* */ }
-      this._liveVersion = null;
-    },
-  };
+  setClass: function(cls, data, complete, version) {
+    store.set(classKey(cls), JSON.stringify({ version:version, data:data, complete:complete }));
+  },
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // BREADCRUMB
-  // ───────────────────────────────────────────────────────────────────────────
-  function setBreadcrumb(crumbs) {
-    const bar = $("breadcrumbBar");
-    if (!bar) return;
-    if (!crumbs || crumbs.length === 0) {
-      bar.style.display = "none";
-      bar.innerHTML = "";
-      document.body.classList.remove("has-bc");
+  getPerson: async function(id) {
+    var liveVer = await api.version();
+    if (!liveVer) return null;
+    var raw = store.get(personKey(id));
+    if (!raw) return null;
+    try {
+      var obj = JSON.parse(raw);
+      if (!obj || obj.version !== liveVer) { store.del(personKey(id)); return null; }
+      return obj.data;
+    } catch(e) { store.del(personKey(id)); return null; }
+  },
+
+  setPerson: function(id, data, version) {
+    store.set(personKey(id), JSON.stringify({ version:version, data:data }));
+  },
+};
+
+// ─── BREADCRUMB ────────────────────────────────────────────────────────────────
+function setBreadcrumb(crumbs) {
+  var bar = $("breadcrumbBar");
+  if (!bar) return;
+  if (!crumbs || crumbs.length === 0) {
+    bar.style.display = "none";
+    bar.innerHTML = "";
+    document.body.classList.remove("has-bc");
+    return;
+  }
+  bar.style.display = "flex";
+  document.body.classList.add("has-bc");
+  bar.innerHTML = crumbs.map(function(c, i) {
+    return i < crumbs.length - 1
+      ? '<a href="' + esc(c.href) + '" class="bc-link">' + esc(c.label) + '</a><span class="bc-sep">›</span>'
+      : '<span class="bc-current">' + esc(c.label) + '</span>';
+  }).join("");
+}
+
+// ─── PAGE: LANDING ─────────────────────────────────────────────────────────────
+function renderLanding() {
+  setBreadcrumb(null);
+  setApp(cloneTemplate("tpl-landing"));
+
+  var cta = $("ctaReveal");
+  if (cta) cta.addEventListener("click", function() { navigate("#/board"); });
+
+  api.stats().then(function(s) {
+    if (!s) return;
+    var el  = $("statTotal");    if (el)  el.textContent  = s.total    != null ? String(s.total)    : "—";
+    var el2 = $("statDebunked"); if (el2) el2.textContent = s.debunked != null ? String(s.debunked) : "—";
+  }).catch(function() {});
+
+  // Background prefetch most common category
+  setTimeout(function() {
+    cache.getClass("Politician").then(function(cached) {
+      if (cached) return;
+      return api.people({ cls:"Politician", sort:"newest" }).then(function(res) {
+        if (!res || !res.data) return;
+        return api.version().then(function(v) {
+          if (v) cache.setClass("Politician", res.data, !res.nextCursor, v);
+        });
+      });
+    }).catch(function() {});
+  }, 1500);
+}
+
+// ─── PAGE: BOARD ───────────────────────────────────────────────────────────────
+function renderBoard() {
+  setBreadcrumb([{ href:"#/", label:"Home" }, { label:"The Board" }]);
+  setApp(cloneTemplate("tpl-board"));
+
+  var grid = $("categoryGrid");
+  if (!grid) return;
+  grid.innerHTML = CLASSES.map(function(cls) {
+    var m = CLASS_META[cls] || { icon:"🔍", desc:"" };
+    return '<a href="#/category/' + encodeURIComponent(cls) + '" class="category-card">' +
+             '<div class="cat-icon">'  + m.icon      + '</div>' +
+             '<div class="cat-name">'  + esc(cls)    + '</div>' +
+             '<div class="cat-desc">'  + esc(m.desc) + '</div>' +
+             '<div class="cat-arrow">→</div>' +
+           '</a>';
+  }).join("");
+}
+
+// ─── PAGE: CATEGORY ─────────────────────────────────────────────────────────────
+async function renderCategory(cls) {
+  setBreadcrumb([
+    { href:"#/",      label:"Home" },
+    { href:"#/board", label:"The Board" },
+    { label:cls },
+  ]);
+  setApp(cloneTemplate("tpl-category"));
+
+  var titleEl  = $("catPageTitle");
+  var listEl   = $("peopleList");
+  var moreWrap = $("loadMoreWrapper");
+  var moreBtn  = $("loadMoreBtn");
+  var searchEl = $("catSearch");
+  var sortEl   = $("catSort");
+
+  if (!listEl) return;
+  if (titleEl) titleEl.textContent = (CLASS_META[cls] ? CLASS_META[cls].icon + " " : "") + cls;
+
+  var currentSort   = "newest";
+  var currentSearch = "";
+  var nextCursor    = null;
+  var allLoaded     = false;
+  var people        = [];
+  var isLoading     = false;
+  var liveVersion   = null;
+
+  function showLoading() {
+    listEl.innerHTML = '<div class="load-msg">Loading…</div>';
+    if (moreWrap) moreWrap.style.display = "none";
+  }
+
+  function showError(msg) {
+    listEl.innerHTML = '<div class="load-msg error">⚠️ ' + esc(msg) + '</div>';
+  }
+
+  function clearFilters() {
+    currentSearch = "";
+    currentSort   = "newest";
+    if (searchEl) searchEl.value = "";
+    if (sortEl)   sortEl.value   = "newest";
+    load(true);
+  }
+
+  function renderList() {
+    if (people.length === 0) {
+      var hasFilters = currentSearch || currentSort !== "newest";
+      listEl.innerHTML =
+        '<div class="empty-state">' +
+          '<p>No results found.</p>' +
+          (hasFilters ? '<button class="btn-outline" id="clearFiltersBtn">✕ Clear Filters</button>' : '') +
+        '</div>';
+      var cb = $("clearFiltersBtn");
+      if (cb) cb.addEventListener("click", clearFilters);
+      if (moreWrap) moreWrap.style.display = "none";
       return;
     }
-    bar.style.display = "flex";
-    document.body.classList.add("has-bc");
-    bar.innerHTML = crumbs.map((c, i) =>
-      i < crumbs.length - 1
-        ? `<a href="${esc(c.href)}" class="bc-link">${esc(c.label)}</a><span class="bc-sep">›</span>`
-        : `<span class="bc-current">${esc(c.label)}</span>`
-    ).join("");
-  }
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // PAGE: LANDING
-  // ───────────────────────────────────────────────────────────────────────────
-  function renderLanding() {
-    setBreadcrumb(null);
-    const frag = cloneTemplate("tpl-landing");
-    setApp(frag);
-
-    $("ctaReveal").addEventListener("click", () => { router.go("#/board"); });
-
-    // Load stats in background (non-blocking)
-    api.stats().then(s => {
-      if (!s) return;
-      const total   = $("statTotal");
-      const debunked = $("statDebunked");
-      if (total)    total.textContent    = s.total    ?? "—";
-      if (debunked) debunked.textContent = s.debunked ?? "—";
-    });
-
-    // Prefetch docs and contact templates into view so they're instant
-    // (they render from <template> tags — no network needed, this just warms JS)
-    setTimeout(() => {
-      if (!store.get(classKey("Politician"))) {
-        api.people({ cls: "Politician", sort: "newest" }).then(res => {
-          if (res && res.data) {
-            cache.getLiveVersion().then(v => {
-              if (v) cache.setClass("Politician", res.data, !res.nextCursor, v);
-            });
-          }
-        }).catch(() => {});
-      }
-    }, 1500); // Delay 1.5s — let landing paint first
-  }
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // PAGE: BOARD (category picker)
-  // ───────────────────────────────────────────────────────────────────────────
-  function renderBoard() {
-    setBreadcrumb([{ href: "#/", label: "Home" }, { label: "The Board" }]);
-    const frag = cloneTemplate("tpl-board");
-    setApp(frag);
-
-    const grid = $("categoryGrid");
-    grid.innerHTML = CLASSES.map(cls => {
-      const m = CLASS_META[cls] || { icon: "🔍", desc: "" };
-      return `
-        <a href="#/category/${encodeURIComponent(cls)}" class="category-card">
-          <div class="cat-icon">${m.icon}</div>
-          <div class="cat-name">${esc(cls)}</div>
-          <div class="cat-desc">${esc(m.desc)}</div>
-          <div class="cat-arrow">→</div>
-        </a>`;
+    listEl.innerHTML = people.map(function(p, i) {
+      var img      = esc(p.image ? p.image.split(",")[0].trim() : "");
+      var hasClaim = p.claim && p.claim.trim();
+      return (
+        '<a href="#/person/' + p.id + '" class="person-row">' +
+          '<img src="' + img + '" class="row-img" alt="' + esc(p.name) + '"' +
+               ' loading="' + (i < 6 ? "eager" : "lazy") + '"' +
+               ' onerror="this.onerror=null;this.src=\'' + SVG_CARD + '\'">' +
+          '<div class="row-info">' +
+            '<h3 class="row-name">' + esc(p.name) + '</h3>' +
+            '<div class="row-meta">' +
+              '<span class="row-class">' + esc(p.class) + '</span>' +
+              '<span class="row-lvl">Lvl ' + esc(String(p.lvl != null ? p.lvl : "?")) + '</span>' +
+              (hasClaim ? '<span class="claim-pill">⚡ Claim</span>' : '') +
+              (p.debunk_count ? '<span class="debunk-pill">🔥 ' + esc(String(p.debunk_count)) + ' debunks</span>' : '') +
+            '</div>' +
+            (p.bio ? '<p class="row-bio">' + esc(p.bio.substring(0, 120)) + (p.bio.length > 120 ? "…" : "") + '</p>' : '') +
+            '<div class="row-date">Added ' + fmtDate(p.timestamp) + '</div>' +
+          '</div>' +
+          '<div class="row-arrow">›</div>' +
+        '</a>'
+      );
     }).join("");
+
+    if (moreWrap) moreWrap.style.display = !allLoaded ? "block" : "none";
   }
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // PAGE: CATEGORY LIST
-  // ───────────────────────────────────────────────────────────────────────────
-  async function renderCategory(cls) {
-    setBreadcrumb([
-      { href: "#/",       label: "Home" },
-      { href: "#/board",  label: "The Board" },
-      { label: cls },
-    ]);
+  async function load(reset) {
+    if (isLoading || (allLoaded && !reset)) return;
+    isLoading = true;
+    if (reset) { people = []; nextCursor = null; allLoaded = false; showLoading(); }
 
-    const frag = cloneTemplate("tpl-category");
-    setApp(frag);
+    var isDefault = currentSort === "newest" && !currentSearch;
 
-    const titleEl   = $("catPageTitle");
-    const listEl    = $("peopleList");
-    const moreWrap  = $("loadMoreWrapper");
-    const moreBtn   = $("loadMoreBtn");
-    const searchEl  = $("catSearch");
-    const sortEl    = $("catSort");
-
-    if (titleEl) titleEl.textContent = `${CLASS_META[cls]?.icon ?? ""} ${cls}`;
-
-    let currentSort   = "newest";
-    let currentSearch = "";
-    let nextCursor    = null;
-    let allLoaded     = false;
-    let people        = [];
-    let isLoading     = false;
-    let liveVersion   = null;
-
-    function showLoading() {
-      listEl.innerHTML = '<div class="load-msg">Loading…</div>';
-      if (moreWrap) moreWrap.style.display = "none";
-    }
-
-    function showError(msg) {
-      listEl.innerHTML = `<div class="load-msg error">⚠️ ${esc(msg)}</div>`;
-    }
-
-    function renderList() {
-      if (people.length === 0) {
-        const hasFilters = currentSearch || currentSort !== "newest";
-        listEl.innerHTML = `
-          <div class="empty-state">
-            <p>No results found.</p>
-            ${hasFilters ? `<button class="btn-outline" onclick="LB._clearCatFilters()">✕ Clear Filters</button>` : ""}
-          </div>`;
-        if (moreWrap) moreWrap.style.display = "none";
-        return;
-      }
-
-      listEl.innerHTML = people.map((p, i) => {
-        const img      = esc(p.image ? p.image.split(",")[0].trim() : "");
-        const hasClaim = p.claim && p.claim.trim();
-        return `
-          <a href="#/person/${p.id}" class="person-row">
-            <img src="${img}" class="row-img" alt="${esc(p.name)}"
-                 loading="${i < 6 ? "eager" : "lazy"}"
-                 onerror="this.onerror=null;this.src='${SVG_CARD}'">
-            <div class="row-info">
-              <h3 class="row-name">${esc(p.name)}</h3>
-              <div class="row-meta">
-                <span class="row-class">${esc(p.class)}</span>
-                <span class="row-lvl">Lvl ${esc(String(p.lvl ?? "?"))}</span>
-                ${hasClaim ? `<span class="claim-pill">⚡ Claim</span>` : ""}
-                ${p.debunk_count ? `<span class="debunk-pill">🔥 ${esc(String(p.debunk_count))} debunks</span>` : ""}
-              </div>
-              ${p.bio ? `<p class="row-bio">${esc(p.bio.substring(0, 120))}${p.bio.length > 120 ? "…" : ""}</p>` : ""}
-              <div class="row-date">Added ${fmtDate(p.timestamp)}</div>
-            </div>
-            <div class="row-arrow">›</div>
-          </a>`;
-      }).join("");
-
-      if (moreWrap) moreWrap.style.display = (!allLoaded) ? "block" : "none";
-    }
-
-    // Expose for the "Clear Filters" button which uses an onclick attribute
-    LB._clearCatFilters = () => {
-      currentSearch = "";
-      currentSort   = "newest";
-      if (searchEl) searchEl.value = "";
-      if (sortEl)   sortEl.value   = "newest";
-      load(true);
-    };
-
-    async function load(reset = false) {
-      if (isLoading || (allLoaded && !reset)) return;
-      isLoading = true;
-
-      if (reset) {
-        people     = [];
-        nextCursor = null;
-        allLoaded  = false;
-        showLoading();
-      }
-
-      const isDefaultSort = currentSort === "newest" && !currentSearch;
-
-      // ── Cache check (only for the clean newest-no-search first page) ───────
-      if (reset && isDefaultSort) {
-        const cached = await cache.getClass(cls);
-        if (cached && cached.data.length > 0) {
+    // Check cache for default first-page view
+    if (reset && isDefault) {
+      try {
+        var cached = await cache.getClass(cls);
+        if (cached && cached.data && cached.data.length > 0) {
           people    = cached.data;
-          allLoaded = cached.complete;
-          nextCursor = null; // cached data always starts from page 1
+          allLoaded = cached.complete === true;
+          nextCursor = null;
           renderList();
           isLoading = false;
           return;
         }
+      } catch(e) { /* cache miss */ }
+    }
+
+    if (!liveVersion) liveVersion = await api.version();
+
+    try {
+      var payload  = await api.people({ cls:cls, sort:currentSort, search:currentSearch, cursor:reset ? null : nextCursor });
+      var incoming = Array.isArray(payload.data) ? payload.data : [];
+      people       = reset ? incoming : people.concat(incoming);
+      nextCursor   = payload.nextCursor || null;
+      if (!nextCursor) allLoaded = true;
+
+      if (reset && isDefault && allLoaded && liveVersion) {
+        cache.setClass(cls, people, true, liveVersion);
       }
-
-      // Snapshot liveVersion before fetch so we cache with the right key
-      if (!liveVersion) liveVersion = await cache.getLiveVersion();
-
-      try {
-        const payload = await api.people({ cls, sort: currentSort, search: currentSearch, cursor: reset ? null : nextCursor });
-        const incoming = Array.isArray(payload.data) ? payload.data : [];
-
-        people     = reset ? incoming : [...people, ...incoming];
-        nextCursor = payload.nextCursor ?? null;
-        if (!nextCursor) allLoaded = true;
-
-        // Cache only the complete default first-page result
-        if (reset && isDefaultSort && allLoaded && liveVersion) {
-          cache.setClass(cls, people, true, liveVersion);
-        }
-
-        renderList();
-      } catch (err) {
-        showError(err.message);
-      } finally {
-        isLoading = false;
-      }
+      renderList();
+    } catch(err) {
+      showError(err.message || "Failed to load");
+    } finally {
+      isLoading = false;
     }
-
-    // Event: search
-    if (searchEl) {
-      searchEl.addEventListener("input", debounce(function(e) {
-        currentSearch = e.target.value.trim();
-        load(true);
-      }));
-    }
-
-    // Event: sort
-    if (sortEl) {
-      sortEl.addEventListener("change", (e) => {
-        currentSort = e.target.value;
-        load(true);
-      });
-    }
-
-    // Event: load more button
-    if (moreBtn) {
-      moreBtn.addEventListener("click", () => load(false));
-    }
-
-    // Initial load
-    load(true);
   }
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // PAGE: PERSON DETAIL
-  // ───────────────────────────────────────────────────────────────────────────
-  async function renderPerson(id) {
-    const frag = cloneTemplate("tpl-person");
-    setApp(frag);
-    const page = $("personPage");
-    if (!page) return;
+  if (searchEl) {
+    searchEl.addEventListener("input", debounce(function(e) {
+      currentSearch = e.target.value.trim();
+      load(true);
+    }));
+  }
+  if (sortEl) {
+    sortEl.addEventListener("change", function(e) { currentSort = e.target.value; load(true); });
+  }
+  if (moreBtn) {
+    moreBtn.addEventListener("click", function() { load(false); });
+  }
 
-    page.innerHTML = '<div class="load-msg">Loading…</div>';
+  load(true);
+}
 
-    // Try to find the person in any cached class first (avoids a network call)
-    let person = null;
+// ─── PAGE: PERSON ──────────────────────────────────────────────────────────────
+async function renderPerson(id) {
+  setBreadcrumb([
+    { href:"#/",      label:"Home" },
+    { href:"#/board", label:"The Board" },
+    { label:"Loading…" },
+  ]);
+  setApp(cloneTemplate("tpl-person"));
 
-    // Check dedicated person cache
-    person = await cache.getPerson(id);
+  var page = $("personPage");
+  if (!page) return;
+  page.innerHTML = '<div class="load-msg">Loading…</div>';
 
-    // Fall back: scan class caches in memory (already parsed above if visited)
-    if (!person) {
-      for (const cls of CLASSES) {
-        const cached = store.get(classKey(cls));
-        if (!cached) continue;
-        try {
-          const obj = JSON.parse(cached);
-          if (obj && Array.isArray(obj.data)) {
-            const found = obj.data.find(p => String(p.id) === String(id));
-            if (found) { person = found; break; }
-          }
-        } catch { /* */ }
-      }
-    }
+  // 1. Dedicated person cache
+  var person = null;
+  try { person = await cache.getPerson(id); } catch(e) {}
 
-    // Fall back to API
-    if (!person) {
+  // 2. Scan class caches — free if user came from a category page
+  if (!person) {
+    for (var ci = 0; ci < CLASSES.length; ci++) {
+      var raw = store.get(classKey(CLASSES[ci]));
+      if (!raw) continue;
       try {
-        person = await api.person(id);
-        const v = await cache.getLiveVersion();
-        if (v && person) cache.setPerson(id, person, v);
-      } catch (err) {
-        page.innerHTML = `<div class="load-msg error">⚠️ Could not load entry: ${esc(err.message)}</div>`;
-        return;
-      }
+        var obj = JSON.parse(raw);
+        if (obj && Array.isArray(obj.data)) {
+          var found = null;
+          for (var pi = 0; pi < obj.data.length; pi++) {
+            if (Number(obj.data[pi].id) === Number(id)) { found = obj.data[pi]; break; }
+          }
+          if (found) { person = found; break; }
+        }
+      } catch(e) {}
     }
+  }
 
-    if (!person) {
-      page.innerHTML = `<div class="load-msg error">Entry not found.</div>`;
+  // 3. API fallback
+  if (!person) {
+    try {
+      person = await api.person(id);
+      var v  = await api.version();
+      if (v && person) cache.setPerson(id, person, v);
+    } catch(err) {
+      page.innerHTML = '<div class="load-msg error">⚠️ ' + esc(err.message) + '</div>';
       return;
     }
+  }
 
-    // Set breadcrumb now that we have the name
-    setBreadcrumb([
-      { href: "#/",                                          label: "Home" },
-      { href: "#/board",                                     label: "The Board" },
-      { href: `#/category/${encodeURIComponent(person.class)}`, label: person.class },
-      { label: person.name },
-    ]);
+  if (!person) {
+    page.innerHTML = '<div class="load-msg error">Entry not found.</div>';
+    return;
+  }
 
-    const images   = person.image ? person.image.split(",").map(s => s.trim()).filter(Boolean) : [];
-    const hasClaim = person.claim   && person.claim.trim()   !== "";
-    const hasTruth = person.truth   && person.truth.trim()   !== "";
-    const hasSrcs  = person.sources && person.sources.trim() !== "";
-    const hasDebunk = hasClaim || hasTruth;
+  setBreadcrumb([
+    { href:"#/",      label:"Home" },
+    { href:"#/board", label:"The Board" },
+    { href:"#/category/" + encodeURIComponent(person.class), label:person.class },
+    { label:person.name },
+  ]);
 
-    // Sources HTML
-    let sourcesHtml = "";
-    if (hasSrcs) {
-      const links = person.sources.split(",").map(s => s.trim()).filter(Boolean);
-      sourcesHtml = `
-        <div class="sources-block">
-          <h4 class="sources-title">🔗 Sources</h4>
-          <div class="sources-links">
-            ${links.map((l, i) => `<a href="${esc(l)}" target="_blank" rel="noopener noreferrer" class="source-link">Source ${i+1} ↗</a>`).join("")}
-          </div>
-        </div>`;
-    }
+  var images    = person.image ? person.image.split(",").map(function(s){return s.trim();}).filter(Boolean) : [];
+  var hasClaim  = !!(person.claim  && person.claim.trim());
+  var hasTruth  = !!(person.truth  && person.truth.trim());
+  var hasSrcs   = !!(person.sources && person.sources.trim());
+  var hasDebunk = hasClaim || hasTruth;
+  var multi     = images.length > 1;
+  var meta      = CLASS_META[person.class] || { icon:"🔍" };
 
-    // Image gallery HTML
-    let galleryHtml = "";
-    if (images.length > 0) {
-      galleryHtml = `
-        <div class="person-gallery">
-          <div class="gallery-main-wrap">
-            <img src="${esc(images[0])}" class="gallery-main" id="galleryMain" alt="${esc(person.name)}"
-                 onerror="this.onerror=null;this.src='${SVG_LARGE}'">
-            ${images.length > 1 ? `
-              <button class="gal-btn gal-prev" onclick="LB._galNav(-1)" aria-label="Previous">❮</button>
-              <button class="gal-btn gal-next" onclick="LB._galNav(1)"  aria-label="Next">❯</button>
-              <div class="gal-counter" id="galCounter">1 / ${images.length}</div>
-            ` : ""}
-          </div>
-          ${images.length > 1 ? `
-            <div class="gallery-thumbs" id="galleryThumbs">
-              ${images.map((img, i) => `
-                <img src="${esc(img)}" class="thumb${i===0?" active":""}" 
-                     onclick="LB._galTo(${i})"
-                     onerror="this.onerror=null;this.src='${SVG_CARD}'"
-                     alt="Image ${i+1}">
-              `).join("")}
-            </div>
-          ` : ""}
-        </div>`;
-    }
+  // Sources block
+  var sourcesHtml = "";
+  if (hasSrcs) {
+    var links = person.sources.split(",").map(function(s){return s.trim();}).filter(Boolean);
+    sourcesHtml =
+      '<div class="sources-block">' +
+        '<h4 class="sources-title">🔗 Sources</h4>' +
+        '<div class="sources-links">' +
+          links.map(function(l, i) {
+            return '<a href="' + esc(l) + '" target="_blank" rel="noopener noreferrer" class="source-link">Source ' + (i+1) + ' ↗</a>';
+          }).join("") +
+        '</div>' +
+      '</div>';
+  }
 
-    page.innerHTML = `
-      <div class="person-hero">
-        ${galleryHtml}
-        <div class="person-header-info">
-          <div class="person-class-badge">${esc(CLASS_META[person.class]?.icon ?? "")} ${esc(person.class)}</div>
-          <h1 class="person-name">${esc(person.name)}</h1>
-          <div class="person-meta-row">
-            <span class="person-lvl">Level ${esc(String(person.lvl ?? "?"))}</span>
-            ${person.debunk_count ? `<span class="debunk-badge">⚡ ${esc(String(person.debunk_count))} debunks</span>` : ""}
-          </div>
-          <div class="person-dates">
-            <span>Added: ${fmtDate(person.timestamp)}</span>
-            ${person.last_corrected ? `<span>Last corrected: ${fmtDate(person.last_corrected)}</span>` : ""}
-          </div>
-          ${person.bio ? `<p class="person-bio">${esc(person.bio)}</p>` : ""}
-        </div>
-      </div>
+  // Gallery block
+  var galleryHtml = "";
+  if (images.length > 0) {
+    galleryHtml =
+      '<div class="person-gallery">' +
+        '<div class="gallery-main-wrap">' +
+          '<img src="' + esc(images[0]) + '" class="gallery-main" id="galleryMain"' +
+               ' alt="' + esc(person.name) + '"' +
+               ' onerror="this.onerror=null;this.src=\'' + SVG_LARGE + '\'">' +
+          (multi
+            ? '<button class="gal-btn gal-prev" id="galPrev" aria-label="Previous">❮</button>' +
+              '<button class="gal-btn gal-next" id="galNext" aria-label="Next">❯</button>' +
+              '<div class="gal-counter" id="galCounter">1 / ' + images.length + '</div>'
+            : '') +
+        '</div>' +
+        (multi
+          ? '<div class="gallery-thumbs" id="galleryThumbs">' +
+              images.map(function(img, i) {
+                return '<img src="' + esc(img) + '" class="thumb' + (i===0 ? ' active' : '') + '"' +
+                            ' data-idx="' + i + '" alt="Image ' + (i+1) + '"' +
+                            ' onerror="this.onerror=null;this.src=\'' + SVG_CARD + '\'">';
+              }).join("") +
+            '</div>'
+          : '') +
+      '</div>';
+  }
 
-      ${hasDebunk ? `
-      <div class="claim-truth-section">
-        <div class="ct-tabs">
-          <button class="ct-tab active" id="claimTab" onclick="LB._showPanel('claim')">⚡ The Claim</button>
-          <button class="ct-tab"        id="truthTab" onclick="LB._showPanel('truth')">✅ The Truth</button>
-        </div>
-        <div id="claimPanel" class="ct-panel claim-panel">
-          <div class="ct-label">WHAT THEY CLAIMED</div>
-          <p>${hasClaim ? esc(person.claim) : "<em style='opacity:0.5'>No claim recorded.</em>"}</p>
-        </div>
-        <div id="truthPanel" class="ct-panel truth-panel" style="display:none">
-          <div class="ct-label">THE VERIFIED TRUTH</div>
-          <p>${hasTruth ? esc(person.truth) : "<em style='opacity:0.5'>No verified truth recorded yet.</em>"}</p>
-          ${sourcesHtml}
-        </div>
-      </div>` : ""}
+  // Claim/Truth section
+  var debunkHtml = "";
+  if (hasDebunk) {
+    debunkHtml =
+      '<div class="claim-truth-section">' +
+        '<div class="ct-tabs">' +
+          '<button class="ct-tab active" id="claimTab">⚡ The Claim</button>' +
+          '<button class="ct-tab" id="truthTab">✅ The Truth</button>' +
+        '</div>' +
+        '<div id="claimPanel" class="ct-panel claim-panel">' +
+          '<div class="ct-label">WHAT THEY CLAIMED</div>' +
+          '<p>' + (hasClaim ? esc(person.claim) : '<em style="opacity:0.5">No claim recorded.</em>') + '</p>' +
+        '</div>' +
+        '<div id="truthPanel" class="ct-panel truth-panel" style="display:none">' +
+          '<div class="ct-label">THE VERIFIED TRUTH</div>' +
+          '<p>' + (hasTruth ? esc(person.truth) : '<em style="opacity:0.5">No verified truth recorded yet.</em>') + '</p>' +
+          sourcesHtml +
+        '</div>' +
+      '</div>';
+  }
 
-      ${!hasDebunk && hasSrcs ? sourcesHtml : ""}
+  page.innerHTML =
+    '<div class="person-hero">' +
+      galleryHtml +
+      '<div class="person-header-info">' +
+        '<div class="person-class-badge">' + meta.icon + ' ' + esc(person.class) + '</div>' +
+        '<h1 class="person-name">' + esc(person.name) + '</h1>' +
+        '<div class="person-meta-row">' +
+          '<span class="person-lvl">Level ' + esc(String(person.lvl != null ? person.lvl : "?")) + '</span>' +
+          (person.debunk_count ? '<span class="debunk-badge">⚡ ' + esc(String(person.debunk_count)) + ' debunks</span>' : '') +
+        '</div>' +
+        '<div class="person-dates">' +
+          '<span>Added: ' + fmtDate(person.timestamp) + '</span>' +
+          (person.last_corrected ? '<span>Last corrected: ' + fmtDate(person.last_corrected) + '</span>' : '') +
+        '</div>' +
+        (person.bio ? '<p class="person-bio">' + esc(person.bio) + '</p>' : '') +
+      '</div>' +
+    '</div>' +
+    debunkHtml +
+    (!hasDebunk && hasSrcs ? sourcesHtml : "") +
+    '<div class="person-back-row">' +
+      '<a href="#/category/' + encodeURIComponent(person.class) + '" class="btn-outline">← Back to ' + esc(person.class) + '</a>' +
+    '</div>';
 
-      <div class="person-back-row">
-        <a href="#/category/${encodeURIComponent(person.class)}" class="btn-outline">← Back to ${esc(person.class)}</a>
-      </div>`;
-
-    // Gallery nav helpers (exposed globally for onclick)
-    let galIdx = 0;
-    LB._galNav = (step) => {
-      galIdx = (galIdx + step + images.length) % images.length;
-      LB._galTo(galIdx);
-    };
-    LB._galTo = (i) => {
+  // Wire gallery buttons with addEventListener — no inline onclick
+  if (multi) {
+    var galIdx = 0;
+    function galTo(i) {
       galIdx = i;
-      const main    = $("galleryMain");
-      const counter = $("galCounter");
-      const thumbs  = document.querySelectorAll(".thumb");
-      if (main)    main.src = images[i];
-      if (counter) counter.textContent = `${i+1} / ${images.length}`;
-      thumbs.forEach((t, ti) => t.classList.toggle("active", ti === i));
-    };
-  }
+      var main    = $("galleryMain");
+      var counter = $("galCounter");
+      if (main)    main.src = images[i] || SVG_LARGE;
+      if (counter) counter.textContent = (i + 1) + " / " + images.length;
+      document.querySelectorAll(".gallery-thumbs .thumb").forEach(function(t, ti) {
+        t.classList.toggle("active", ti === i);
+      });
+    }
+    var prevBtn = $("galPrev");
+    var nextBtn = $("galNext");
+    if (prevBtn) prevBtn.addEventListener("click", function() { galTo((galIdx - 1 + images.length) % images.length); });
+    if (nextBtn) nextBtn.addEventListener("click", function() { galTo((galIdx + 1) % images.length); });
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // PANEL TOGGLE (claim / truth)
-  // ───────────────────────────────────────────────────────────────────────────
-  LB._showPanel = (panel) => {
-    const cp = $("claimPanel"), tp = $("truthPanel");
-    const ct = $("claimTab"),   tt = $("truthTab");
-    if (!cp || !tp) return;
-    const isClaim = panel === "claim";
-    cp.style.display = isClaim ? "" : "none";
-    tp.style.display = isClaim ? "none" : "";
-    ct.classList.toggle("active", isClaim);
-    tt.classList.toggle("active", !isClaim);
-  };
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // PAGE: DOCS
-  // ───────────────────────────────────────────────────────────────────────────
-  function renderDocs() {
-    setBreadcrumb([{ href:"#/", label:"Home" }, { label:"Documentation" }]);
-    setApp(cloneTemplate("tpl-docs"));
-  }
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // PAGE: CONTACT
-  // ───────────────────────────────────────────────────────────────────────────
-  function renderContact() {
-    setBreadcrumb([{ href:"#/", label:"Home" }, { label:"Contact" }]);
-    setApp(cloneTemplate("tpl-contact"));
-
-    const copyBtn = $("copyResultBtn");
-    if (copyBtn) {
-      copyBtn.addEventListener("click", () => {
-        const ta = $("contactOutput");
-        if (!ta) return;
-        navigator.clipboard.writeText(ta.value).catch(() => {
-          ta.select(); document.execCommand("copy");
-        });
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => { copyBtn.textContent = "Copy to Clipboard"; }, 2000);
+    var thumbsEl = $("galleryThumbs");
+    if (thumbsEl) {
+      thumbsEl.addEventListener("click", function(e) {
+        var t = e.target.closest(".thumb");
+        if (!t) return;
+        var idx = parseInt(t.dataset.idx, 10);
+        if (!isNaN(idx)) galTo(idx);
       });
     }
   }
 
-  // Contact helpers exposed for template onclick attributes
-  const contact = {
-    addInput(containerId) {
-      const c = $(containerId);
-      if (!c) return;
-      const d = document.createElement("div");
-      d.className = "name-entry";
-      d.innerHTML = `<input type="text" placeholder="Enter name…" class="name-input" maxlength="50">`;
-      c.appendChild(d);
-    },
-    generateList(type) {
-      const id = type === "ADD" ? "addListContainer" : "removeListContainer";
-      const inputs = document.querySelectorAll(`#${id} .name-input`);
-      const names  = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
-      if (!names.length) { alert("Please enter at least one name."); return; }
-      const out = $("contactOutput");
-      const res = $("contactResult");
-      if (out) out.value = `--- ${type} REQUEST ---\n${names.join("\n")}`;
-      if (res) { res.style.display = "block"; res.scrollIntoView({ behavior:"smooth" }); }
-    },
-  };
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // PAGE: 404
-  // ───────────────────────────────────────────────────────────────────────────
-  function render404() {
-    setBreadcrumb(null);
-    setApp(cloneTemplate("tpl-404"));
+  // Wire claim/truth tabs
+  var claimTab = $("claimTab");
+  var truthTab = $("truthTab");
+  if (claimTab && truthTab) {
+    function showPanel(panel) {
+      var cp = $("claimPanel"), tp = $("truthPanel");
+      if (!cp || !tp) return;
+      var isClaim = panel === "claim";
+      cp.style.display = isClaim ? "" : "none";
+      tp.style.display = isClaim ? "none" : "";
+      claimTab.classList.toggle("active", isClaim);
+      truthTab.classList.toggle("active", !isClaim);
+    }
+    claimTab.addEventListener("click", function() { showPanel("claim"); });
+    truthTab.addEventListener("click", function() { showPanel("truth"); });
   }
+}
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // ROUTER
-  // ───────────────────────────────────────────────────────────────────────────
-  const router = {
-    go(hash) { window.location.hash = hash; },
+// ─── PAGE: DOCS ────────────────────────────────────────────────────────────────
+function renderDocs() {
+  setBreadcrumb([{ href:"#/", label:"Home" }, { label:"Documentation" }]);
+  setApp(cloneTemplate("tpl-docs"));
+}
 
-    async dispatch() {
-      const hash = window.location.hash || "#/";
-      const path = hash.slice(1) || "/";
+// ─── PAGE: CONTACT ─────────────────────────────────────────────────────────────
+function renderContact() {
+  setBreadcrumb([{ href:"#/", label:"Home" }, { label:"Contact" }]);
+  setApp(cloneTemplate("tpl-contact"));
 
-      // Highlight active nav link
-      document.querySelectorAll(".nav-link, .drawer-link").forEach(a => {
-        a.classList.toggle("active", path.startsWith(a.getAttribute("href")?.slice(1) ?? "___NONE___"));
+  var copyBtn = $("copyResultBtn");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", function() {
+      var ta = $("contactOutput");
+      if (!ta) return;
+      navigator.clipboard.writeText(ta.value).catch(function() {
+        ta.select(); document.execCommand("copy");
       });
-
-      const parts = path.split("/").filter(Boolean); // ["", "category", "CEO"] → ["category","CEO"]
-
-      if (path === "/" || path === "") {
-        renderLanding();
-      } else if (path === "/board") {
-        renderBoard();
-      } else if (parts[0] === "category" && parts[1]) {
-        const cls = decodeURIComponent(parts[1]);
-        if (!CLASSES.includes(cls)) { render404(); return; }
-        await renderCategory(cls);
-      } else if (parts[0] === "person" && parts[1]) {
-        const id = parseInt(parts[1], 10);
-        if (isNaN(id)) { render404(); return; }
-        await renderPerson(id);
-      } else if (path === "/docs") {
-        renderDocs();
-      } else if (path === "/contact") {
-        renderContact();
-      } else {
-        render404();
-      }
-    },
-  };
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // NAVBAR MOBILE HAMBURGER
-  // ───────────────────────────────────────────────────────────────────────────
-  function initNav() {
-    const btn    = $("navHamburger");
-    const drawer = $("navDrawer");
-    if (!btn || !drawer) return;
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      drawer.classList.toggle("open");
-    });
-    document.addEventListener("click", (e) => {
-      if (!drawer.contains(e.target) && e.target !== btn) {
-        drawer.classList.remove("open");
-      }
-    });
-    // Close drawer on any link click
-    drawer.querySelectorAll("a").forEach(a => {
-      a.addEventListener("click", () => drawer.classList.remove("open"));
+      copyBtn.textContent = "Copied!";
+      setTimeout(function() { copyBtn.textContent = "Copy to Clipboard"; }, 2000);
     });
   }
+}
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // BOOT
-  // ───────────────────────────────────────────────────────────────────────────
-  function init() {
-    initNav();
-    window.addEventListener("hashchange", () => router.dispatch());
-    router.dispatch();
+// ─── PAGE: 404 ─────────────────────────────────────────────────────────────────
+function render404() {
+  setBreadcrumb(null);
+  setApp(cloneTemplate("tpl-404"));
+}
+
+// ─── CONTACT HELPERS (called from template onclick="LB.contact.x()") ───────────
+// Declared before window.LB so they can be referenced in the LB object literal.
+function contactAddInput(containerId) {
+  var c = $(containerId);
+  if (!c) return;
+  var d   = document.createElement("div");
+  d.className = "name-entry";
+  var inp = document.createElement("input");
+  inp.type        = "text";
+  inp.placeholder = "Enter name…";
+  inp.className   = "name-input";
+  inp.maxLength   = 50;
+  d.appendChild(inp);
+  c.appendChild(d);
+}
+
+function contactGenerateList(type) {
+  var id     = type === "ADD" ? "addListContainer" : "removeListContainer";
+  var inputs = document.querySelectorAll("#" + id + " .name-input");
+  var names  = Array.from(inputs).map(function(i) { return i.value.trim(); }).filter(Boolean);
+  if (!names.length) { alert("Please enter at least one name."); return; }
+  var out = $("contactOutput");
+  var res = $("contactResult");
+  if (out) out.value = "--- " + type + " REQUEST ---\n" + names.join("\n");
+  if (res) { res.style.display = "block"; res.scrollIntoView({ behavior:"smooth" }); }
+}
+
+// ─── ROUTER ────────────────────────────────────────────────────────────────────
+var _navigating = false;
+
+function navigate(hash) {
+  window.location.hash = hash;
+}
+
+async function dispatch() {
+  if (_navigating) return;
+  _navigating = true;
+  try {
+    var hash  = window.location.hash || "#/";
+    var path  = hash.slice(1) || "/";
+    var parts = path.split("/").filter(Boolean);
+
+    // Active nav highlighting — exact match only (no prefix false-positives)
+    document.querySelectorAll(".nav-link, .drawer-link").forEach(function(a) {
+      var href = (a.getAttribute("href") || "").slice(1); // "#/board" → "/board"
+      var isActive = (href === "/" && path === "/")
+                  || (href !== "/" && (path === href || path.indexOf(href + "/") === 0));
+      a.classList.toggle("active", isActive);
+    });
+
+    if (path === "/" || path === "") {
+      renderLanding();
+    } else if (path === "/board") {
+      renderBoard();
+    } else if (parts[0] === "category" && parts[1]) {
+      var cls = decodeURIComponent(parts[1]);
+      if (CLASSES.indexOf(cls) === -1) { render404(); return; }
+      await renderCategory(cls);
+    } else if (parts[0] === "person" && parts[1]) {
+      var pid = parseInt(parts[1], 10);
+      if (isNaN(pid)) { render404(); return; }
+      await renderPerson(pid);
+    } else if (path === "/docs") {
+      renderDocs();
+    } else if (path === "/contact") {
+      renderContact();
+    } else {
+      render404();
+    }
+  } catch(err) {
+    console.error("Router error:", err);
+    render404();
+  } finally {
+    _navigating = false;
   }
+}
 
-  // Public surface
-  return { init, router, cache, api, contact, _showPanel: () => {}, _galNav: () => {}, _galTo: () => {}, _clearCatFilters: () => {} };
+// ─── NAVBAR ────────────────────────────────────────────────────────────────────
+function initNav() {
+  var btn    = $("navHamburger");
+  var drawer = $("navDrawer");
+  if (!btn || !drawer) return;
 
-})(); // end IIFE
+  btn.addEventListener("click", function(e) {
+    e.stopPropagation();
+    var open = drawer.classList.toggle("open");
+    btn.setAttribute("aria-expanded", String(open));
+  });
 
-// Kick off
-LB.init();
+  document.addEventListener("click", function(e) {
+    if (!drawer.contains(e.target) && e.target !== btn) {
+      drawer.classList.remove("open");
+      btn.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  drawer.querySelectorAll("a").forEach(function(a) {
+    a.addEventListener("click", function() {
+      drawer.classList.remove("open");
+      btn.setAttribute("aria-expanded", "false");
+    });
+  });
+}
+
+// ─── EXPOSE MINIMAL GLOBAL API ─────────────────────────────────────────────────
+// Only what the contact template's onclick= attributes need.
+// Everything else uses addEventListener so no globals are needed.
+window.LB = {
+  contact: {
+    addInput:     contactAddInput,
+    generateList: contactGenerateList,
+  },
+};
+
+// ─── BOOT ──────────────────────────────────────────────────────────────────────
+initNav();
+window.addEventListener("hashchange", function() { dispatch(); });
+dispatch();
