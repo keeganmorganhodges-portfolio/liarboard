@@ -1,39 +1,40 @@
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
+    const ip = request.headers.get("cf-connecting-ip");
 
-    // =========================================================================
-    // HELPERS
-    // =========================================================================
-    const checkAuth = async (req) => {
-      const auth = req.headers.get("Authorization");
-      if (!auth || !auth.startsWith("Basic ")) return null;
-      try {
-        const decoded = atob(auth.split(" ")[1]);
-        const i = decoded.indexOf(":");
-        if (i === -1) return null;
-        const user = decoded.substring(0, i);
-        const pass = decoded.substring(i + 1);
-        if (user === "admin" && pass === env.ADMIN_PASSWORD) return { user, role: "main" };
-        const row = await env.DB
-          .prepare("SELECT username, role FROM admin_users WHERE username = ? AND password = ?")
-          .bind(user, pass).first();
-        return row ? { user: row.username, role: row.role } : null;
-      } catch { return null; }
-    };
+    // 1. Simple Rate Limiting (Using KV)
+    const rateLimitKey = `rl_${ip}`;
+    const currentRequests = await env.KV.get(rateLimitKey) || 0;
+    
+    if (parseInt(currentRequests) > 100) { // Limit: 100 reqs per minute
+      return new Response("Too Many Requests", { status: 429 });
+    }
+    await env.KV.put(rateLimitKey, parseInt(currentRequests) + 1, { expirationTtl: 60 });
 
-    // ORDER BY whitelist — safe to interpolate because only these values can pass
-    const SORT_MAP = {
-      newest:        "timestamp DESC",
-      oldest:        "timestamp ASC",
-      lvlHigh:       "CAST(lvl AS INTEGER) DESC, timestamp DESC",
-      lvlLow:        "CAST(lvl AS INTEGER) ASC, timestamp DESC",
-      mostDebunked:  "debunk_count DESC, timestamp DESC",
-      recentCorrect: "last_corrected DESC, timestamp DESC",
-    };
+    // 2. Cache Logic for Data Requests
+    if (url.pathname.startsWith("/api/data")) {
+      const cache = caches.default;
+      let response = await cache.match(request);
 
-    const VALID_CLASSES = new Set(["Politician","CEO","Media","Celebrity","Influencer","Official","Other"]);
+      if (!response) {
+        // If not in cache, fetch from D1
+        const data = await env.D1.prepare("SELECT * FROM people").all();
+        response = new Response(JSON.stringify(data), {
+          headers: { 
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=3600" // Cache for 1 hour
+          }
+        });
+        // Store in cache
+        await cache.put(request, response.clone());
+      }
+      return response;
+    }
 
+    return env.ASSETS.fetch(request);
+  }
+};
     // Common response helpers
     const jsonResp = (data, status = 200, extra = {}) =>
       new Response(JSON.stringify(data), {
