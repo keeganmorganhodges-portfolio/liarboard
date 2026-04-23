@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Primary SEO -->
+  <title>LiarBoard | Public Figures, Tracked Claims</title>
+  <meta name="description" content="Public figures say a lot; we track what's actually true. LiarBoard is a visual database where every claim is held against the light. When the truth is hidden, we put it back on the Board.">
+  <meta name="keywords" content="LiarBoard, fact-check, claims, public figures, truth, debunked, verified">
+  <meta name="author" content="LiarBoard">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://liarboard.pages.dev">
+  <meta property="og:title" content="LiarBoard | Public Figures, Tracked Claims">
+  <meta property="og:description" content="Public figures say a lot; we track what's actually true. LiarBoard is a visual database where every claim is held against the light.">
+  <meta property="og:image" content="https://wrtzeypczqoqnzgqiksx.supabase.co/storage/v1/object/public/IMAGES/anon.jpeg">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://liarboard.pages.dev">
+  <meta property="twitter:title" content="LiarBoard | Public Figures, Tracked Claims">
+  <meta property="twitter:description" content="Public figures say a lot; we track what's actually true. When the truth is hidden, we put it back on the Board.">
+  <meta property="twitter:image" content="https://wrtzeypczqoqnzgqiksx.supabase.co/storage/v1/object/public/IMAGES/anon.jpeg">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/jpeg" href="https://wrtzeypczqoqnzgqiksx.supabase.co/storage/v1/object/public/IMAGES/anon.jpeg">
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0f172a">
+
+  <!-- Preconnect to image CDN for faster loads -->
+  <link rel="preconnect" href="https://wrtzeypczqoqnzgqiksx.supabase.co">
+
+  <link rel="stylesheet" href="/styles/app.css">
+</head>
+<body>
+
+  <!-- ── USER COUNT BANNER ──────────────────────────────────────────────── -->
+  <div class="user-count-bar" id="userCountBar">
+    <span>👥 <strong id="userCountNum">—</strong> registered members on LiarBoard</span>
+  </div>
+
+  <!-- Cloudflare Turnstile widget script -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
+  <!-- ── NAVBAR (always visible) ──────────────────────────────────────────── -->
+  <nav class="navbar" id="navbar">
+    <a href="#/" class="nav-logo" aria-label="LiarBoard home">
+      <img src="https://wrtzeypczqoqnzgqiksx.supabase.co/storage/v1/object/public/IMAGES/anon.jpeg" alt="LiarBoard">
+      <span>LiarBoard</span>
+    </a>
+    <div class="nav-links">
+      <a href="#/board" class="nav-link">The Board</a>
+      <a href="#/docs" class="nav-link">Docs</a>
+      <a href="#/contact" class="nav-link">Contact</a>
+      <a href="#/messages" class="nav-link" id="navMessages" style="display:none" title="Messages">💬</a>
+      <a href="#/profile" class="nav-link" id="navProfile" style="display:none">My Profile</a>
+      <a href="#/login" class="nav-link" id="navLogin">Sign In</a>
+      <button class="nav-link nav-logout-btn" id="navLogout" style="display:none">Sign Out</button>
+    </div>
+    <button class="nav-hamburger" id="navHamburger" aria-label="Menu">☰</button>
+  </nav>
+
+  <!-- Mobile nav drawer -->
+  <div class="nav-drawer" id="navDrawer">
+    <a href="#/board" class="drawer-link">The Board</a>
+    <a href="#/docs" class="drawer-link">Docs</a>
+    <a href="#/contact" class="drawer-link">Contact</a>
+    <a href="#/messages" class="drawer-link" id="drawerMessages" style="display:none">Messages</a>
+    <a href="#/profile" class="drawer-link" id="drawerProfile" style="display:none">My Profile</a>
+    <a href="#/login" class="drawer-link" id="drawerLogin">Sign In</a>
+    <a href="#/signup" class="drawer-link" id="drawerSignup">Sign Up</a>
+    <button class="drawer-link nav-logout-btn" id="drawerLogout" style="display:none;background:none;border:none;text-align:left;width:100%;cursor:pointer;color:#94a3b8;font-size:15px;padding:16px 24px">Sign Out</button>
+  </div>
+
+  <!-- ── BREADCRUMB BAR (shown on board + category + person pages) ────────── -->
+  <div class="breadcrumb-bar" id="breadcrumbBar" aria-label="Breadcrumb"></div>
+
+  <!-- ── MAIN SPA VIEWPORT ────────────────────────────────────────────────── -->
+  <main id="app"></main>
+
+  <!-- ── PAGE TEMPLATES (hidden, cloned by router) ────────────────────────── -->
+
+  <!-- LANDING PAGE -->
+  <template id="tpl-landing">
+    <section class="landing">
+      <div class="landing-hero">
+        <div class="landing-badge">FACT-CHECKED DATABASE</div>
+        <h1 class="landing-title">The Board <br>Doesn't Lie.</h1>
+        <p class="landing-sub">Public figures say a lot. We track what's actually true.</p>
+        <p class="landing-desc">LiarBoard is a visual database where every claim is held against the light. When the truth is hidden, we put it back on the Board.</p>
+        <button class="cta-btn" id="ctaReveal">
+          <span>Reveal the Truth</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+      <div class="landing-stats" id="landingStats">
+        <div class="stat-card"><span class="stat-num" id="statTotal">—</span><span class="stat-label">Entries</span></div>
+        <div class="stat-card"><span class="stat-num" id="statDebunked">—</span><span class="stat-label">Claims on Record</span></div>
+        <div class="stat-card"><span class="stat-num" id="statClasses">7</span><span class="stat-label">Categories</span></div>
+      </div>
+      <div class="landing-features">
+        <div class="feature-card">
+          <div class="feature-icon">⚡</div>
+          <h3>Claims Tracked</h3>
+          <p>Every public statement verified against reality. The Claim vs. The Truth, side by side.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔗</div>
+          <h3>Source-Backed</h3>
+          <p>Every truth comes with linked sources. No anonymous accusations — just cited facts.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📂</div>
+          <h3>Categorized</h3>
+          <p>Browse by category: Politicians, CEOs, Media figures, and more.</p>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <!-- BOARD (category picker) -->
+  <template id="tpl-board">
+    <section class="board-page">
+      <header class="page-header">
+        <h1>Choose a Category</h1>
+        <p>Select a category to browse entries. Each category is loaded and cached independently.</p>
+      </header>
+      <div class="category-grid" id="categoryGrid">
+        <!-- Injected by router -->
+      </div>
+    </section>
+  </template>
+
+  <!-- CATEGORY LIST PAGE -->
+  <template id="tpl-category">
+    <section class="category-page">
+      <header class="page-header">
+        <h1 id="catPageTitle"></h1>
+        <div class="cat-toolbar">
+          <input type="text" id="catSearch" placeholder="Search by name…" aria-label="Search">
+          <select id="catSort" aria-label="Sort order">
+            <option value="newest">Newest Added</option>
+            <option value="oldest">Oldest Added</option>
+            <option value="lvlHigh">Highest Level</option>
+            <option value="lvlLow">Lowest Level</option>
+            <option value="mostDebunked">Most Debunked</option>
+            <option value="recentCorrect">Recently Corrected</option>
+          </select>
+        </div>
+      </header>
+      <div class="people-list" id="peopleList"></div>
+      <div id="loadMoreWrapper" style="text-align:center;padding:30px 0;display:none">
+        <button class="load-more-btn" id="loadMoreBtn">Load More</button>
+      </div>
+    </section>
+  </template>
+
+  <!-- PERSON DETAIL PAGE -->
+  <template id="tpl-person">
+    <article class="person-page" id="personPage">
+      <!-- Injected by router -->
+    </article>
+  </template>
+
+  <!-- DOCS PAGE -->
+  <template id="tpl-docs">
+    <section class="docs-page">
+      <h1 class="page-title">Documentation</h1>
+      <p class="page-subtitle">Terms of Service, Privacy Policy, and instructions for LiarBoard.</p>
+
+      <details class="doc-section" open>
+        <summary>How to Use</summary>
+        <div class="doc-content">
+          <p><strong>Browsing:</strong> From the Board, pick a category. Each category page shows all entries in that class. Click any entry to see full details — the claim, the verified truth, and all sources.</p>
+          <p><strong>Sorting &amp; Searching:</strong> Use the search bar or sort options on any category page to narrow results. "Most Debunked" surfaces the most active fact-check entries.</p>
+          <p><strong>Submissions:</strong> Use the Contact page to generate a formatted request. Copy and email it to <strong>liarboard.business@gmail.com</strong>. Removals must include who you are, your relation to the subject, and your reason.</p>
+          <p><strong>Note:</strong> All entries are reviewed manually. Changes can take time. Donors get priority.</p>
+        </div>
+      </details>
+
+      <details class="doc-section">
+        <summary>Privacy &amp; Terms</summary>
+        <div class="doc-content">
+          <p><strong>Privacy Policy:</strong> LiarBoard does not store your personal data or IP for marketing. Your public IP is tracked live (not stored) solely to enforce rate limits via Cloudflare's network. We only store the public profile data visible on the Board: names, bios, images, claims, truths, and sources. Removal requests are processed manually.</p>
+          <p><strong>Terms of Service:</strong> By using this site you agree not to submit entries with the intent to harass. All entries you request are your responsibility. LiarBoard and affiliated entities are voided from responsibility — legal, moral, or otherwise. All entries must serve public interest. We reserve the right to deny or remove any entry at our discretion.</p>
+        </div>
+      </details>
+
+      <details class="doc-section">
+        <summary>Roadmap</summary>
+        <div class="doc-content">
+          <p>✅ Phase 1: Initial Board Launch</p>
+          <p>✅ Phase 2: Image Carousel</p>
+          <p>✅ Phase 3: Claim vs. Truth Toggle with Sources</p>
+          <p>✅ Phase 4: Most Debunked / Recently Corrected Filters</p>
+          <p>✅ Phase 5: SPA with Category Pages &amp; Person Detail Pages</p>
+          <p>🔜 Phase 6: User Account System</p>
+          <p>🔜 Phase 7: User Messaging System</p>
+        </div>
+      </details>
+
+      <details class="doc-section">
+        <summary>Support the Project</summary>
+        <div class="doc-content">
+          <p>Keeping LiarBoard running takes time and resources. If you find it useful, consider donating. We don't have a built-in system yet — email the admin to arrange it. Sharing the site is also a great way to help.</p>
+        </div>
+      </details>
+    </section>
+  </template>
+
+  <!-- CONTACT PAGE -->
+  <template id="tpl-contact">
+    <section class="contact-page">
+      <h1 class="page-title">Manage the Board</h1>
+      <p class="page-subtitle">Request adding or removing people from LiarBoard. Or email us directly at <strong>liarboard.business@gmail.com</strong>.</p>
+
+      <details class="doc-section" open>
+        <summary>Add New People</summary>
+        <div class="doc-content">
+          <p>Enter full names to request they be added. Max 50 characters each.</p>
+          <div id="addListContainer">
+            <div class="name-entry"><input type="text" placeholder="First and last name" class="name-input" maxlength="50"></div>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-outline" onclick="LB.contact.addInput('addListContainer')">+ Add Another</button>
+            <button type="button" class="btn-green" onclick="LB.contact.generateList('ADD')">Generate Add Request</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="doc-section">
+        <summary>Request Person Removal</summary>
+        <div class="doc-content">
+          <p>Enter names to request removal from the Board.</p>
+          <div id="removeListContainer">
+            <div class="name-entry"><input type="text" placeholder="Full Name" class="name-input" maxlength="50"></div>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-outline" onclick="LB.contact.addInput('removeListContainer')">+ Add Another</button>
+            <button type="button" class="btn-red" onclick="LB.contact.generateList('REMOVE')">Generate Removal Request</button>
+          </div>
+        </div>
+      </details>
+
+      <div id="contactResult" style="display:none;margin-top:24px">
+        <p>Copy this and email to: <strong>liarboard.business@gmail.com</strong></p>
+        <textarea id="contactOutput" readonly class="output-box"></textarea>
+        <button type="button" class="btn-outline" id="copyResultBtn" style="margin-top:12px">Copy to Clipboard</button>
+      </div>
+    </section>
+  </template>
+
+  <!-- 404 PAGE -->
+  <template id="tpl-404">
+    <section class="not-found">
+      <h1>404</h1>
+      <p>This page doesn't exist on the Board.</p>
+      <a href="#/" class="btn-primary">← Back to Home</a>
+    </section>
+  </template>
+
+  <!-- LOGIN PAGE -->
+  <template id="tpl-login">
+    <section class="auth-page">
+      <div class="auth-card">
+        <h1 class="auth-title">Sign In</h1>
+        <p class="auth-sub">New here? <a href="#/signup" class="auth-link">Create an account</a></p>
+        <div id="loginError" class="auth-error" style="display:none"></div>
+        <div class="form-group"><label>Username</label><input type="text" id="loginUsername" autocomplete="username" placeholder="your_username"></div>
+        <div class="form-group"><label>Password</label><input type="password" id="loginPassword" autocomplete="current-password" placeholder="••••••••"></div>
+        <div class="cf-turnstile" data-sitekey="REPLACE_WITH_YOUR_TURNSTILE_SITE_KEY" id="loginTurnstile"></div>
+        <button class="btn-primary w100" id="loginBtn">Sign In</button>
+      </div>
+    </section>
+  </template>
+
+  <!-- SIGNUP PAGE -->
+  <template id="tpl-signup">
+    <section class="auth-page">
+      <div class="auth-card">
+        <h1 class="auth-title">Create Account</h1>
+        <p class="auth-sub">Already have one? <a href="#/login" class="auth-link">Sign in</a></p>
+        <div id="signupError" class="auth-error" style="display:none"></div>
+        <div id="signupSuccess" class="auth-success" style="display:none"></div>
+        <div class="form-group"><label>Username <small>(3–30 chars, letters/numbers/_-)</small></label><input type="text" id="signupUsername" autocomplete="username" placeholder="cool_username"></div>
+        <div class="form-group"><label>Email</label><input type="email" id="signupEmail" autocomplete="email" placeholder="you@example.com"></div>
+        <div class="form-group"><label>Password <small>(min 8 chars)</small></label><input type="password" id="signupPassword" autocomplete="new-password" placeholder="••••••••"></div>
+        <div class="cf-turnstile" data-sitekey="REPLACE_WITH_YOUR_TURNSTILE_SITE_KEY" id="signupTurnstile"></div>
+        <button class="btn-primary w100" id="signupBtn">Create Account</button>
+      </div>
+    </section>
+  </template>
+
+  <!-- MY PROFILE PAGE -->
+  <template id="tpl-profile">
+    <section class="profile-page">
+      <h1 class="page-title">My Profile</h1>
+      <div class="profile-grid">
+        <div class="profile-card">
+          <h3>Public Profile</h3>
+          <p class="profile-note">Changes are reviewed by an admin before going live. Approved fields are cached for 2 weeks.</p>
+          <div id="profileCurrentData" class="profile-current"></div>
+          <hr style="border-color:#334155;margin:16px 0">
+          <h4>Request a Change</h4>
+          <div class="form-group">
+            <label>Field to change</label>
+            <select id="profileField">
+              <option value="display_name">Display Name (max 40 chars)</option>
+              <option value="bio">Bio (max 500 chars)</option>
+              <option value="contact_info">Contact Info (max 200 chars)</option>
+              <option value="avatar_url">Avatar URL (max 300 chars)</option>
+            </select>
+          </div>
+          <div class="form-group"><label>New value</label><textarea id="profileValue" rows="3" placeholder="Enter new value…"></textarea></div>
+          <button class="btn-primary" id="profileSubmitBtn">Submit for Review</button>
+          <div id="profileMsg" style="margin-top:10px;font-size:13px"></div>
+        </div>
+        <div class="profile-card">
+          <h3>Account Info</h3>
+          <div id="profileAccountInfo" class="profile-current"></div>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <!-- VIEW OTHER USER'S PROFILE -->
+  <template id="tpl-user-profile">
+    <section class="profile-page">
+      <div id="userProfileContent" class="profile-card"></div>
+    </section>
+  </template>
+
+  <!-- MESSAGES PAGE -->
+  <template id="tpl-messages">
+    <section class="messages-page">
+      <h1 class="page-title">Messages</h1>
+      <p class="page-subtitle" style="font-size:13px;color:#64748b">Messages refresh once per day. Daily send limit applies.</p>
+      <div class="msg-layout">
+        <div class="msg-compose">
+          <h3>Send a Message</h3>
+          <div class="form-group"><label>To (username)</label><input type="text" id="msgTo" placeholder="recipient_username"></div>
+          <div class="form-group"><label>Message <small>(max 1000 chars)</small></label><textarea id="msgBody" rows="4" placeholder="Write your message…"></textarea></div>
+          <button class="btn-primary" id="msgSendBtn">Send Message</button>
+          <div id="msgSendResult" style="margin-top:8px;font-size:13px"></div>
+        </div>
+        <div class="msg-inbox">
+          <h3>Inbox</h3>
+          <div id="inboxList" class="inbox-list"><div class="load-msg">Loading…</div></div>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <!-- CHAT PAGE -->
+  <template id="tpl-chat">
+    <section class="chat-page">
+      <h1 class="page-title">Live Chat with Admin</h1>
+      <div id="chatStatusBox" class="chat-status-box">
+        <div class="load-msg">Checking status…</div>
+      </div>
+      <div id="chatControls" style="margin-top:20px"></div>
+      <div id="chatNote" class="chat-note">
+        <p><strong>Note:</strong> Live chat requires the admin to be online and available. You may join the queue and will be notified when the admin joins your session. Sessions are limited to <strong id="chatTimeLimit">5 minutes</strong>.</p>
+        <p style="color:#64748b;font-size:13px;margin-top:8px">Full real-time chat functionality requires Cloudflare Workers Paid plan (Durable Objects). Queue management is available now.</p>
+      </div>
+    </section>
+  </template>
+
+  <!-- CONTACT PAGE (updated) -->
+  <template id="tpl-contact">
+    <section class="contact-page">
+      <h1 class="page-title">Contact &amp; Submissions</h1>
+      <p class="page-subtitle">Signed-in users can submit add/remove requests directly. One add and one remove request per day per account.</p>
+
+      <details class="doc-section" open>
+        <summary>Request to Add People</summary>
+        <div class="doc-content">
+          <p>Enter full names to request they be added to LiarBoard. Submissions are reviewed by admins.</p>
+          <div id="addListContainer"><div class="name-entry"><input type="text" placeholder="First and last name" class="name-input" maxlength="100"></div></div>
+          <div class="btn-row" style="margin-top:12px">
+            <button type="button" class="btn-outline" onclick="LB.contact.addInput('addListContainer')">+ Add Another</button>
+            <button type="button" class="btn-green" id="submitAddBtn">Submit Add Request</button>
+          </div>
+          <div id="addResult" style="margin-top:10px;font-size:13px"></div>
+        </div>
+      </details>
+
+      <details class="doc-section">
+        <summary>Request Person Removal</summary>
+        <div class="doc-content">
+          <p>Enter names you wish to have removed from the Board.</p>
+          <div id="removeListContainer"><div class="name-entry"><input type="text" placeholder="Full Name" class="name-input" maxlength="100"></div></div>
+          <div class="btn-row" style="margin-top:12px">
+            <button type="button" class="btn-outline" onclick="LB.contact.addInput('removeListContainer')">+ Add Another</button>
+            <button type="button" class="btn-red" id="submitRemoveBtn">Submit Removal Request</button>
+          </div>
+          <div id="removeResult" style="margin-top:10px;font-size:13px"></div>
+        </div>
+      </details>
+
+      <details class="doc-section">
+        <summary>Live Chat with Admin</summary>
+        <div class="doc-content">
+          <p>You can request a live chat session with the admin. <a href="#/chat" class="auth-link">Open the chat page →</a></p>
+        </div>
+      </details>
+
+      <details class="doc-section">
+        <summary>Email Contact</summary>
+        <div class="doc-content">
+          <p>For anything else, email: <strong>liarboard.business@gmail.com</strong></p>
+        </div>
+      </details>
+
+      <!-- Turnstile for submission -->
+      <div class="cf-turnstile" data-sitekey="REPLACE_WITH_YOUR_TURNSTILE_SITE_KEY" id="contactTurnstile" style="margin-top:20px"></div>
+    </section>
+  </template>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
