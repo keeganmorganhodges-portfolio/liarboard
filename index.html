@@ -38,6 +38,14 @@
 </head>
 <body>
 
+  <!-- ── USER COUNT BANNER ──────────────────────────────────────────────── -->
+  <div class="user-count-bar" id="userCountBar">
+    <span>👥 <strong id="userCountNum">—</strong> registered members on LiarBoard</span>
+  </div>
+
+  <!-- Cloudflare Turnstile widget script -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+
   <!-- ── NAVBAR (always visible) ──────────────────────────────────────────── -->
   <nav class="navbar" id="navbar">
     <a href="#/" class="nav-logo" aria-label="LiarBoard home">
@@ -48,6 +56,10 @@
       <a href="#/board" class="nav-link">The Board</a>
       <a href="#/docs" class="nav-link">Docs</a>
       <a href="#/contact" class="nav-link">Contact</a>
+      <a href="#/messages" class="nav-link" id="navMessages" style="display:none" title="Messages">💬</a>
+      <a href="#/profile" class="nav-link" id="navProfile" style="display:none">My Profile</a>
+      <a href="#/login" class="nav-link" id="navLogin">Sign In</a>
+      <button class="nav-link nav-logout-btn" id="navLogout" style="display:none">Sign Out</button>
     </div>
     <button class="nav-hamburger" id="navHamburger" aria-label="Menu">☰</button>
   </nav>
@@ -57,6 +69,11 @@
     <a href="#/board" class="drawer-link">The Board</a>
     <a href="#/docs" class="drawer-link">Docs</a>
     <a href="#/contact" class="drawer-link">Contact</a>
+    <a href="#/messages" class="drawer-link" id="drawerMessages" style="display:none">Messages</a>
+    <a href="#/profile" class="drawer-link" id="drawerProfile" style="display:none">My Profile</a>
+    <a href="#/login" class="drawer-link" id="drawerLogin">Sign In</a>
+    <a href="#/signup" class="drawer-link" id="drawerSignup">Sign Up</a>
+    <button class="drawer-link nav-logout-btn" id="drawerLogout" style="display:none;background:none;border:none;text-align:left;width:100%;cursor:pointer;color:#94a3b8;font-size:15px;padding:16px 24px">Sign Out</button>
   </div>
 
   <!-- ── BREADCRUMB BAR (shown on board + category + person pages) ────────── -->
@@ -243,6 +260,164 @@
       <h1>404</h1>
       <p>This page doesn't exist on the Board.</p>
       <a href="#/" class="btn-primary">← Back to Home</a>
+    </section>
+  </template>
+
+  <!-- LOGIN PAGE -->
+  <template id="tpl-login">
+    <section class="auth-page">
+      <div class="auth-card">
+        <h1 class="auth-title">Sign In</h1>
+        <p class="auth-sub">New here? <a href="#/signup" class="auth-link">Create an account</a></p>
+        <div id="loginError" class="auth-error" style="display:none"></div>
+        <div class="form-group"><label>Username</label><input type="text" id="loginUsername" autocomplete="username" placeholder="your_username"></div>
+        <div class="form-group"><label>Password</label><input type="password" id="loginPassword" autocomplete="current-password" placeholder="••••••••"></div>
+        <div class="cf-turnstile" data-sitekey="REPLACE_WITH_YOUR_TURNSTILE_SITE_KEY" id="loginTurnstile"></div>
+        <button class="btn-primary w100" id="loginBtn">Sign In</button>
+      </div>
+    </section>
+  </template>
+
+  <!-- SIGNUP PAGE -->
+  <template id="tpl-signup">
+    <section class="auth-page">
+      <div class="auth-card">
+        <h1 class="auth-title">Create Account</h1>
+        <p class="auth-sub">Already have one? <a href="#/login" class="auth-link">Sign in</a></p>
+        <div id="signupError" class="auth-error" style="display:none"></div>
+        <div id="signupSuccess" class="auth-success" style="display:none"></div>
+        <div class="form-group"><label>Username <small>(3–30 chars, letters/numbers/_-)</small></label><input type="text" id="signupUsername" autocomplete="username" placeholder="cool_username"></div>
+        <div class="form-group"><label>Email</label><input type="email" id="signupEmail" autocomplete="email" placeholder="you@example.com"></div>
+        <div class="form-group"><label>Password <small>(min 8 chars)</small></label><input type="password" id="signupPassword" autocomplete="new-password" placeholder="••••••••"></div>
+        <div class="cf-turnstile" data-sitekey="REPLACE_WITH_YOUR_TURNSTILE_SITE_KEY" id="signupTurnstile"></div>
+        <button class="btn-primary w100" id="signupBtn">Create Account</button>
+      </div>
+    </section>
+  </template>
+
+  <!-- MY PROFILE PAGE -->
+  <template id="tpl-profile">
+    <section class="profile-page">
+      <h1 class="page-title">My Profile</h1>
+      <div class="profile-grid">
+        <div class="profile-card">
+          <h3>Public Profile</h3>
+          <p class="profile-note">Changes are reviewed by an admin before going live. Approved fields are cached for 2 weeks.</p>
+          <div id="profileCurrentData" class="profile-current"></div>
+          <hr style="border-color:#334155;margin:16px 0">
+          <h4>Request a Change</h4>
+          <div class="form-group">
+            <label>Field to change</label>
+            <select id="profileField">
+              <option value="display_name">Display Name (max 40 chars)</option>
+              <option value="bio">Bio (max 500 chars)</option>
+              <option value="contact_info">Contact Info (max 200 chars)</option>
+              <option value="avatar_url">Avatar URL (max 300 chars)</option>
+            </select>
+          </div>
+          <div class="form-group"><label>New value</label><textarea id="profileValue" rows="3" placeholder="Enter new value…"></textarea></div>
+          <button class="btn-primary" id="profileSubmitBtn">Submit for Review</button>
+          <div id="profileMsg" style="margin-top:10px;font-size:13px"></div>
+        </div>
+        <div class="profile-card">
+          <h3>Account Info</h3>
+          <div id="profileAccountInfo" class="profile-current"></div>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <!-- VIEW OTHER USER'S PROFILE -->
+  <template id="tpl-user-profile">
+    <section class="profile-page">
+      <div id="userProfileContent" class="profile-card"></div>
+    </section>
+  </template>
+
+  <!-- MESSAGES PAGE -->
+  <template id="tpl-messages">
+    <section class="messages-page">
+      <h1 class="page-title">Messages</h1>
+      <p class="page-subtitle" style="font-size:13px;color:#64748b">Messages refresh once per day. Daily send limit applies.</p>
+      <div class="msg-layout">
+        <div class="msg-compose">
+          <h3>Send a Message</h3>
+          <div class="form-group"><label>To (username)</label><input type="text" id="msgTo" placeholder="recipient_username"></div>
+          <div class="form-group"><label>Message <small>(max 1000 chars)</small></label><textarea id="msgBody" rows="4" placeholder="Write your message…"></textarea></div>
+          <button class="btn-primary" id="msgSendBtn">Send Message</button>
+          <div id="msgSendResult" style="margin-top:8px;font-size:13px"></div>
+        </div>
+        <div class="msg-inbox">
+          <h3>Inbox</h3>
+          <div id="inboxList" class="inbox-list"><div class="load-msg">Loading…</div></div>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <!-- CHAT PAGE -->
+  <template id="tpl-chat">
+    <section class="chat-page">
+      <h1 class="page-title">Live Chat with Admin</h1>
+      <div id="chatStatusBox" class="chat-status-box">
+        <div class="load-msg">Checking status…</div>
+      </div>
+      <div id="chatControls" style="margin-top:20px"></div>
+      <div id="chatNote" class="chat-note">
+        <p><strong>Note:</strong> Live chat requires the admin to be online and available. You may join the queue and will be notified when the admin joins your session. Sessions are limited to <strong id="chatTimeLimit">5 minutes</strong>.</p>
+        <p style="color:#64748b;font-size:13px;margin-top:8px">Full real-time chat functionality requires Cloudflare Workers Paid plan (Durable Objects). Queue management is available now.</p>
+      </div>
+    </section>
+  </template>
+
+  <!-- CONTACT PAGE (updated) -->
+  <template id="tpl-contact">
+    <section class="contact-page">
+      <h1 class="page-title">Contact &amp; Submissions</h1>
+      <p class="page-subtitle">Signed-in users can submit add/remove requests directly. One add and one remove request per day per account.</p>
+
+      <details class="doc-section" open>
+        <summary>Request to Add People</summary>
+        <div class="doc-content">
+          <p>Enter full names to request they be added to LiarBoard. Submissions are reviewed by admins.</p>
+          <div id="addListContainer"><div class="name-entry"><input type="text" placeholder="First and last name" class="name-input" maxlength="100"></div></div>
+          <div class="btn-row" style="margin-top:12px">
+            <button type="button" class="btn-outline" onclick="LB.contact.addInput('addListContainer')">+ Add Another</button>
+            <button type="button" class="btn-green" id="submitAddBtn">Submit Add Request</button>
+          </div>
+          <div id="addResult" style="margin-top:10px;font-size:13px"></div>
+        </div>
+      </details>
+
+      <details class="doc-section">
+        <summary>Request Person Removal</summary>
+        <div class="doc-content">
+          <p>Enter names you wish to have removed from the Board.</p>
+          <div id="removeListContainer"><div class="name-entry"><input type="text" placeholder="Full Name" class="name-input" maxlength="100"></div></div>
+          <div class="btn-row" style="margin-top:12px">
+            <button type="button" class="btn-outline" onclick="LB.contact.addInput('removeListContainer')">+ Add Another</button>
+            <button type="button" class="btn-red" id="submitRemoveBtn">Submit Removal Request</button>
+          </div>
+          <div id="removeResult" style="margin-top:10px;font-size:13px"></div>
+        </div>
+      </details>
+
+      <details class="doc-section">
+        <summary>Live Chat with Admin</summary>
+        <div class="doc-content">
+          <p>You can request a live chat session with the admin. <a href="#/chat" class="auth-link">Open the chat page →</a></p>
+        </div>
+      </details>
+
+      <details class="doc-section">
+        <summary>Email Contact</summary>
+        <div class="doc-content">
+          <p>For anything else, email: <strong>liarboard.business@gmail.com</strong></p>
+        </div>
+      </details>
+
+      <!-- Turnstile for submission -->
+      <div class="cf-turnstile" data-sitekey="REPLACE_WITH_YOUR_TURNSTILE_SITE_KEY" id="contactTurnstile" style="margin-top:20px"></div>
     </section>
   </template>
 
