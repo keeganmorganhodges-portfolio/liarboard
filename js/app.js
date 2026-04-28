@@ -284,7 +284,7 @@ async function renderCategory(cls) {
     listEl.innerHTML = people.map(function(p, i) {
       var img      = esc(p.image ? p.image.split(",")[0].trim() : "");
       var hasClaim = p.claim && p.claim.trim();
-      var claimCount = hasClaim ? p.claim.split(/\n\n+/).filter(function(s){return s.trim();}).length : 0;
+      var claimCount = hasClaim ? p.claim.split('`').filter(function(s){return s.trim();}).length : 0;
       var claimPill = hasClaim
         ? '<span class="claim-pill">⚡ ' + (claimCount > 1 ? claimCount + ' Claims' : 'Claim') + '</span>'
         : '';
@@ -482,12 +482,12 @@ async function renderPerson(id) {
   // Claim/Truth section — supports multiple entries separated by \n\n
   var debunkHtml = "";
   if (hasDebunk) {
-    // Split by double newline (blank line), filter empty chunks
+    // Split by backtick character into separate accordion sections
     var claimEntries = hasClaim
-      ? person.claim.split(/\n\n+/).map(function(s){return s.trim();}).filter(Boolean)
+      ? person.claim.split('`').map(function(s){return s.trim();}).filter(Boolean)
       : [];
     var truthEntries = hasTruth
-      ? person.truth.split(/\n\n+/).map(function(s){return s.trim();}).filter(Boolean)
+      ? person.truth.split('`').map(function(s){return s.trim();}).filter(Boolean)
       : [];
 
     // Helper to render a single entry block — accordion for all entries (single or multiple)
@@ -495,14 +495,11 @@ async function renderPerson(id) {
       if (!entries.length) {
         return '<p class="ct-empty"><em>' + emptyMsg + '</em></p>';
       }
-      // All entries (including single) rendered as collapsible <details> accordion
       return '<div class="ct-accordion">' +
         entries.map(function(entry, i) {
           // Pull first line (or first 80 chars) as the summary preview
           var firstLine = entry.split('\n')[0].trim();
           var preview   = firstLine.length > 80 ? firstLine.slice(0, 80) + '…' : firstLine;
-          // Replace newlines with backtick separator inside the body content
-          var bodyContent = esc(entry).replace(/\n/g, ' ` ');
           return '<details class="ct-accordion-item ' + cardClass + '"' + (i === 0 ? ' open' : '') + '>' +
                    '<summary class="ct-accordion-summary">' +
                      '<span class="ct-accordion-num">#' + (i + 1) + '</span>' +
@@ -510,7 +507,7 @@ async function renderPerson(id) {
                      '<span class="ct-accordion-chevron">›</span>' +
                    '</summary>' +
                    '<div class="ct-accordion-body">' +
-                     '<p>' + bodyContent + '</p>' +
+                     '<p>' + esc(entry).replace(/\n/g, '<br>') + '</p>' +
                    '</div>' +
                  '</details>';
         }).join('') +
