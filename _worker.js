@@ -105,18 +105,43 @@ export default {
         query += " AND class = ?";
         params.push(filterClass);
       }
-      if (cursor && (sortParam === "newest" || sortParam === "oldest")) {
+
+      // Timestamp-based cursor (fast seek) for newest/oldest sorts only.
+      // For all other sorts use an OFFSET cursor encoded as a plain integer
+      // so the frontend can always pass `nextCursor` uniformly.
+      if (cursor) {
         const cursorNum = parseInt(cursor, 10);
         if (!isNaN(cursorNum)) {
-          query += sortParam === "newest" ? " AND timestamp < ?" : " AND timestamp > ?";
-          params.push(cursorNum);
+          if (sortParam === "newest") {
+            query += " AND timestamp < ?";
+            params.push(cursorNum);
+          } else if (sortParam === "oldest") {
+            query += " AND timestamp > ?";
+            params.push(cursorNum);
+          } else {
+            // OFFSET-based paging for rank sorts (lvlHigh, lvlLow, mostDebunked, recentCorrect)
+            query += ` ORDER BY ${orderBy} LIMIT 50 OFFSET ?`;
+            params.push(cursorNum);
+            const { results } = await env.DB.prepare(query).bind(...params).all();
+            const nextCursor  = results.length === 50 ? cursorNum + 50 : null;
+            return jsonResp({ data: results, nextCursor }, 200, { "Cache-Control": "no-store" });
+          }
         }
       }
 
       query += ` ORDER BY ${orderBy} LIMIT 50`;
 
       const { results } = await env.DB.prepare(query).bind(...params).all();
-      const nextCursor  = results.length === 50 ? results[results.length - 1].timestamp : null;
+      // For timestamp sorts: next cursor is the last row's timestamp.
+      // For rank sorts on first page: next cursor is the page size (50).
+      let nextCursor = null;
+      if (results.length === 50) {
+        if (sortParam === "newest" || sortParam === "oldest") {
+          nextCursor = results[results.length - 1].timestamp;
+        } else {
+          nextCursor = 50; // OFFSET for page 2
+        }
+      }
 
       return jsonResp({ data: results, nextCursor }, 200, { "Cache-Control": "no-store" });
     }
@@ -228,8 +253,8 @@ export default {
       <label>Bio / Description</label>
       <textarea name="bio" rows="2" placeholder="Brief public description…"></textarea>
       <div class="row">
-        <div><label>The Claim <small>(what they said)</small></label><textarea name="claim" rows="2" placeholder="What they claimed…"></textarea></div>
-        <div><label>The Truth <small>(verified fact)</small></label><textarea name="truth" rows="2" placeholder="What actually happened…"></textarea></div>
+        <div><label>The Claim(s) <small>(separate multiple claims with a blank line)</small></label><textarea name="claim" rows="4" placeholder="Claim #1…&#10;&#10;Claim #2…"></textarea></div>
+        <div><label>The Truth(s) <small>(one truth per claim, blank line between each)</small></label><textarea name="truth" rows="4" placeholder="Truth #1…&#10;&#10;Truth #2…"></textarea></div>
       </div>
       <label>Sources <small>(comma-separated URLs)</small></label>
       <textarea name="sources" rows="2" placeholder="https://source1.com, https://source2.com"></textarea>
@@ -258,8 +283,8 @@ export default {
       <label>Bio</label>
       <textarea name="bio" id="editBio" rows="2"></textarea>
       <div class="row">
-        <div><label>The Claim</label><textarea name="claim" id="editClaim" rows="2"></textarea></div>
-        <div><label>The Truth</label><textarea name="truth" id="editTruth" rows="2"></textarea></div>
+        <div><label>The Claim(s) <small>(blank line between each)</small></label><textarea name="claim" id="editClaim" rows="4"></textarea></div>
+        <div><label>The Truth(s) <small>(blank line between each)</small></label><textarea name="truth" id="editTruth" rows="4"></textarea></div>
       </div>
       <label>Sources</label>
       <textarea name="sources" id="editSources" rows="2"></textarea>
@@ -374,7 +399,7 @@ export default {
         if (!name || !image) return new Response("Name and Image are required.", { status: 400 });
 
         await env.DB.prepare(
-          "UPDATE people SET name=?,image=?,bio=?,claim=?,truth=?,sources=?,class=?,lvl=?,last_corrected=? WHERE id=?"
+          "UPDATE people SET name=?,image=?,bio=?,claim=?,truth=?,sources=?,class=?,lvl=?,last_corrected=?,debunk_count=debunk_count+1 WHERE id=?"
         ).bind(name, image, bio, claim, truth, sources, cls, lvl, now, id).run();
 
         return Response.redirect(`${origin}/admin`, 302);

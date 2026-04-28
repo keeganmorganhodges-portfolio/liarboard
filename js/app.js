@@ -284,6 +284,10 @@ async function renderCategory(cls) {
     listEl.innerHTML = people.map(function(p, i) {
       var img      = esc(p.image ? p.image.split(",")[0].trim() : "");
       var hasClaim = p.claim && p.claim.trim();
+      var claimCount = hasClaim ? p.claim.split(/\n\n+/).filter(function(s){return s.trim();}).length : 0;
+      var claimPill = hasClaim
+        ? '<span class="claim-pill">⚡ ' + (claimCount > 1 ? claimCount + ' Claims' : 'Claim') + '</span>'
+        : '';
       return (
         '<a href="#/person/' + p.id + '" class="person-row">' +
           '<img src="' + img + '" class="row-img" alt="' + esc(p.name) + '"' +
@@ -294,7 +298,7 @@ async function renderCategory(cls) {
             '<div class="row-meta">' +
               '<span class="row-class">' + esc(p.class) + '</span>' +
               '<span class="row-lvl">Lvl ' + esc(String(p.lvl != null ? p.lvl : "?")) + '</span>' +
-              (hasClaim ? '<span class="claim-pill">⚡ Claim</span>' : '') +
+              (hasClaim ? claimPill : '') +
               (p.debunk_count ? '<span class="debunk-pill">🔥 ' + esc(String(p.debunk_count)) + ' debunks</span>' : '') +
             '</div>' +
             (p.bio ? '<p class="row-bio">' + esc(p.bio.substring(0, 120)) + (p.bio.length > 120 ? "…" : "") + '</p>' : '') +
@@ -475,22 +479,50 @@ async function renderPerson(id) {
       '</div>';
   }
 
-  // Claim/Truth section
+  // Claim/Truth section — supports multiple entries separated by \n\n
   var debunkHtml = "";
   if (hasDebunk) {
+    // Split by double newline (blank line), filter empty chunks
+    var claimEntries = hasClaim
+      ? person.claim.split(/\n\n+/).map(function(s){return s.trim();}).filter(Boolean)
+      : [];
+    var truthEntries = hasTruth
+      ? person.truth.split(/\n\n+/).map(function(s){return s.trim();}).filter(Boolean)
+      : [];
+
+    // Helper to render a single entry block with an index badge
+    function renderEntries(entries, emptyMsg, cardClass) {
+      if (!entries.length) {
+        return '<p class="ct-empty"><em>' + emptyMsg + '</em></p>';
+      }
+      return entries.map(function(entry, i) {
+        var badge = entries.length > 1
+          ? '<span class="ct-entry-badge">#' + (i + 1) + '</span>'
+          : '';
+        return '<div class="ct-entry ' + cardClass + '">' +
+                 badge +
+                 '<p>' + esc(entry).replace(/\n/g, '<br>') + '</p>' +
+               '</div>';
+      }).join('');
+    }
+
     debunkHtml =
       '<div class="claim-truth-section">' +
         '<div class="ct-tabs">' +
-          '<button class="ct-tab active" id="claimTab">⚡ The Claim</button>' +
-          '<button class="ct-tab" id="truthTab">✅ The Truth</button>' +
+          '<button class="ct-tab active" id="claimTab">⚡ The Claim' +
+            (claimEntries.length > 1 ? ' <span class="ct-count">' + claimEntries.length + '</span>' : '') +
+          '</button>' +
+          '<button class="ct-tab" id="truthTab">✅ The Truth' +
+            (truthEntries.length > 1 ? ' <span class="ct-count">' + truthEntries.length + '</span>' : '') +
+          '</button>' +
         '</div>' +
         '<div id="claimPanel" class="ct-panel claim-panel">' +
           '<div class="ct-label">WHAT THEY CLAIMED</div>' +
-          '<p>' + (hasClaim ? esc(person.claim) : '<em style="opacity:0.5">No claim recorded.</em>') + '</p>' +
+          renderEntries(claimEntries, 'No claim recorded.', 'ct-entry-claim') +
         '</div>' +
         '<div id="truthPanel" class="ct-panel truth-panel" style="display:none">' +
           '<div class="ct-label">THE VERIFIED TRUTH</div>' +
-          '<p>' + (hasTruth ? esc(person.truth) : '<em style="opacity:0.5">No verified truth recorded yet.</em>') + '</p>' +
+          renderEntries(truthEntries, 'No verified truth recorded yet.', 'ct-entry-truth') +
           sourcesHtml +
         '</div>' +
       '</div>';

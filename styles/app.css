@@ -653,3 +653,68 @@ body.has-bc #app { padding-top: calc(var(--navbar-h) + var(--bc-h)); }
   .person-page, .category-page, .board-page { padding-left: 14px; padding-right: 14px; }
   .stat-num { font-size: 1.7rem; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* MULTI-CLAIM ENTRIES                                                          */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Count badge on the tab button (shows number of claims/truths) */
+.ct-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.15);
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* Individual claim/truth entry card */
+.ct-entry {
+  position: relative;
+  border-radius: var(--radius-sm, 8px);
+  padding: 16px 18px 14px;
+  margin-bottom: 12px;
+  line-height: 1.65;
+}
+.ct-entry:last-child { margin-bottom: 0; }
+
+.ct-entry-claim {
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.20);
+}
+.ct-entry-truth {
+  background: rgba(34,197,94,0.08);
+  border: 1px solid rgba(34,197,94,0.20);
+}
+
+/* Numbered badge for entries when there are multiple */
+.ct-entry-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--muted, #94a3b8);
+  background: rgba(255,255,255,0.07);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-bottom: 8px;
+}
+
+.ct-entry p {
+  margin: 0;
+  color: var(--text, #e2e8f0);
+  font-size: 0.95rem;
+  white-space: pre-line;
+}
+
+.ct-empty {
+  color: var(--muted, #64748b);
+  font-style: italic;
+  margin: 0;
+}
